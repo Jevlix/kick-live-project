@@ -13,7 +13,7 @@ KICK_PUSHER_KEY = "32cbd69e4b950bf97679"
 KICK_WS_URL = f"wss://ws-us2.pusher.com/app/{KICK_PUSHER_KEY}?protocol=7&client=js&version=8.4.0&flash=false"
 
 # Buraya kendi test edeceğin yayıncının chatroom ID'sini yaz
-CHANNEL_ID = "27666667"
+CHANNEL_ID = "25951243"
 
 app = FastAPI(title="Kick Live Test")
 
