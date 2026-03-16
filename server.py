@@ -8,7 +8,7 @@ import websockets
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query
 from fastapi.staticfiles import StaticFiles
 
-from db import DB_PATH
+from db import DB_PATH, init_db
 
 KICK_PUSHER_KEY = "32cbd69e4b950bf97679"
 KICK_WS_URL = f"wss://ws-us2.pusher.com/app/{KICK_PUSHER_KEY}?protocol=7&client=js&version=8.4.0&flash=false"
@@ -1060,4 +1060,5 @@ app.mount("/", StaticFiles(directory="static", html=True), name="static")
 
 @app.on_event("startup")
 async def startup_event():
+    init_db()
     asyncio.create_task(kick_listener())
