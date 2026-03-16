@@ -9,6 +9,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query
 from fastapi.staticfiles import StaticFiles
 
 from db import DB_PATH, init_db
+import re
 
 KICK_PUSHER_KEY = "32cbd69e4b950bf97679"
 KICK_WS_URL = f"wss://ws-us2.pusher.com/app/{KICK_PUSHER_KEY}?protocol=7&client=js&version=8.4.0&flash=false"
@@ -143,7 +144,7 @@ def build_summary_from_events(events):
                 # kelimeler
                 for raw_word in str(message).split():
                     word = normalize_word(raw_word)
-                    if len(word) < 2:
+                    if not word:
                         continue
 
                     if word not in words_map:
@@ -158,7 +159,7 @@ def build_summary_from_events(events):
                         words_map[word]["top_user_map"][username] = words_map[word]["top_user_map"].get(username, 0) + 1
 
                 # emotes
-                import re
+                
                 emote_matches = re.findall(r"\[emote:(\d+):([^\]]+)\]", str(message))
                 for emote_id, emote_name in emote_matches:
                     key = f"{emote_id}:{emote_name}"
@@ -341,7 +342,7 @@ def build_summary_from_events(events):
 
     stats["unique_users"] = len(users_map)
 
-    users = sorted(users_map.values(), key=lambda x: x["mc"], reverse=True)[:200]
+    users = sorted(users_map.values(), key=lambda x: x["mc"], reverse=True)
 
     words = []
     for word_data in words_map.values():
@@ -358,7 +359,7 @@ def build_summary_from_events(events):
         })
 
     words.sort(key=lambda x: x["c"], reverse=True)
-    words = words[:200]
+    
 
     emotes = []
     for emote_data in emotes_map.values():
@@ -377,7 +378,6 @@ def build_summary_from_events(events):
         })
 
     emotes.sort(key=lambda x: x["c"], reverse=True)
-    emotes = emotes[:200]
 
     spam = []
     for spam_data in spam_map.values():
@@ -398,7 +398,7 @@ def build_summary_from_events(events):
         })
 
     spam.sort(key=lambda x: x["c"], reverse=True)
-    spam = spam[:100]
+    spam = spam
 
     mods_map = {}
     for action in moderation_actions:
@@ -470,15 +470,15 @@ def build_summary_from_events(events):
             "unbans": stats["unbans"],
             "deleted_messages": stats["deleted_messages"],
         },
-        "mods": mods[:100],
-        "recent_actions": sorted(moderation_actions, key=lambda x: x["t"], reverse=True)[:150]
+        "mods": mods,
+        "recent_actions": sorted(moderation_actions, key=lambda x: x["t"], reverse=True)
     }
 
     game_special = {
-        "all_pool": words[:100],
-        "top_5_users": users[:5],
-        "top_5_words": words[:5],
-        "top_5_emotes": emotes[:5]
+        "all_pool": words[:500],
+        "top_10_users": users[:10],
+        "top_10_words": words[:10],
+        "top_10_emotes": emotes[:10]
     }
 
     return {
