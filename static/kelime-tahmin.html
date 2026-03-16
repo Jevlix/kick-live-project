@@ -1,0 +1,725 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kelime Tahmin</title>
+
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/assets/css/style.css">
+
+    <style>
+        .timer-bar {
+            transition: width 1s linear;
+            background: #22c55e;
+            height: 12px;
+            border-radius: 999px;
+            box-shadow: 0 0 20px #22c55e;
+        }
+
+        .countdown-text {
+            font-size: 11rem;
+            font-weight: 900;
+            color: #22c55e;
+            text-shadow: 0 0 60px #22c55e;
+            line-height: 1;
+        }
+
+        .soft-scroll::-webkit-scrollbar { width: 6px; }
+        .soft-scroll::-webkit-scrollbar-thumb { background: #22c55e; border-radius: 999px; }
+        .soft-scroll::-webkit-scrollbar-track { background: transparent; }
+
+        .emote-target {
+            min-height: 120px;
+            min-width: 120px;
+        }
+    </style>
+</head>
+<body>
+<div id="app" class="flex h-screen overflow-hidden">
+    <div v-html="sidebar"></div>
+
+    <main class="flex-1 flex flex-col overflow-hidden relative">
+        <header class="p-6 border-b border-white/5 flex justify-between items-center bg-[#05070a]">
+            <div>
+                <h2 class="text-xl font-black text-green-400 uppercase italic">{{ pageTitle }}</h2>
+                <p class="text-xs text-gray-400 mt-1 uppercase tracking-wider">
+                    {{ currentModeLabel || currentFilterLabel || 'Veri seç' }}
+                </p>
+            </div>
+
+            <div class="flex items-center gap-2 text-xs font-black uppercase tracking-wider">
+                <span class="w-2.5 h-2.5 rounded-full" :class="isConnected ? 'bg-green-400' : 'bg-red-500'"></span>
+                <span :class="isConnected ? 'text-green-400' : 'text-red-400'">
+                    {{ isConnected ? 'Chat Aktif' : 'Chat Bağlanıyor' }}
+                </span>
+            </div>
+        </header>
+
+        <section class="page-section flex-1 p-8 scroll-flat overflow-y-auto">
+            <div class="max-w-5xl mx-auto min-h-full">
+                <div v-if="gamePhase == 'lobby'" class="h-full flex flex-col justify-center text-center space-y-8">
+                    <h2 class="text-7xl font-black italic text-green-400 uppercase tracking-tighter">KELİME TAHMİN</h2>
+
+                    <div class="glass p-10 rounded-[50px] max-w-4xl mx-auto space-y-6 border-t-8 border-green-500 shadow-2xl">
+                        <div class="grid md:grid-cols-2 gap-4 text-left">
+                            <div class="bg-white/5 p-4 rounded-2xl border border-white/10">
+                                <div class="text-[10px] uppercase tracking-widest text-gray-500 font-black mb-2">Veri Bağlamı</div>
+                                <div class="text-lg font-black text-green-300">{{ currentFilterLabel || 'Veri seç' }}</div>
+                                <div class="text-xs opacity-60 mt-2">
+                                    Kelime soruları seçtiğin veri moduna göre hazırlanır.
+                                </div>
+                            </div>
+
+                            <div class="bg-white/5 p-4 rounded-2xl border border-white/10">
+                                <div class="text-[10px] uppercase tracking-widest text-gray-500 font-black mb-2">Veri Durumu</div>
+                                <div class="text-lg font-black" :class="dataReady ? 'text-green-400' : 'text-yellow-400'">
+                                    {{ dataReady ? 'Hazır' : 'Yükleniyor' }}
+                                </div>
+                                <div class="text-xs opacity-60 mt-2">
+                                    Kelimeler: {{ words.length }} • Özel Havuz: {{ (gameSpecial?.all_pool || []).length }}
+                                </div>
+                            </div>
+                        </div>
+
+                        <div
+                            v-if="filterWarning"
+                            class="bg-yellow-500/10 border border-yellow-500/20 rounded-2xl p-4 text-yellow-300 text-sm font-bold text-left"
+                        >
+                            <i class="fa fa-triangle-exclamation mr-2"></i>
+                            {{ filterWarning }}
+                        </div>
+
+                        <div class="bg-black/30 border border-white/10 rounded-2xl p-5 text-left">
+                            <div class="text-[11px] uppercase tracking-widest text-gray-500 font-black mb-4">Veri Seçimi</div>
+
+                            <div class="grid md:grid-cols-2 xl:grid-cols-4 gap-4">
+                                <div>
+                                    <label class="block text-xs mb-2 font-black uppercase tracking-wider text-green-300">Veri Modu</label>
+                                    <select
+                                        v-model="localFilter.mode"
+                                        @change="handleModeChange"
+                                        class="w-full bg-black border border-white/10 rounded-xl p-3 text-white"
+                                    >
+                                        <option value="live">Canlı Yayın</option>
+                                        <option value="offstream_live">Canlı Offstream</option>
+                                        <option value="stream">Yayın Seç</option>
+                                        <option value="day">Gün Seç</option>
+                                        <option value="offstream_day">Offstream Gün</option>
+                                        <option value="week">Son 7 Gün</option>
+                                        <option value="month">Ay Seç</option>
+                                        <option value="all">Tüm Zamanlar</option>
+                                    </select>
+                                </div>
+
+                                <div v-if="localFilter.mode === 'stream'">
+                                    <label class="block text-xs mb-2 font-black uppercase tracking-wider text-green-300">Yayın</label>
+                                    <select
+                                        v-model="localFilter.stream_id"
+                                        @change="handleFilterChange"
+                                        class="w-full bg-black border border-white/10 rounded-xl p-3 text-white"
+                                    >
+                                        <option value="">Yayın seç</option>
+                                        <option v-for="s in streamOptions" :key="String(s.id)" :value="String(s.id)">
+                                            {{ formatStreamLabel(s) }}
+                                        </option>
+                                    </select>
+                                </div>
+
+                                <div v-if="localFilter.mode === 'day' || localFilter.mode === 'offstream_day'">
+                                    <label class="block text-xs mb-2 font-black uppercase tracking-wider text-green-300">
+                                        {{ localFilter.mode === 'offstream_day' ? 'Offstream Gün' : 'Gün' }}
+                                    </label>
+                                    <input
+                                        v-model="localFilter.date"
+                                        @change="handleFilterChange"
+                                        type="date"
+                                        class="w-full bg-black border border-white/10 rounded-xl p-3 text-white"
+                                    >
+                                </div>
+
+                                <div v-if="localFilter.mode === 'month'">
+                                    <label class="block text-xs mb-2 font-black uppercase tracking-wider text-green-300">Ay</label>
+                                    <input
+                                        v-model="localFilter.month"
+                                        @change="handleFilterChange"
+                                        type="month"
+                                        class="w-full bg-black border border-white/10 rounded-xl p-3 text-white"
+                                    >
+                                </div>
+
+                                <div class="md:col-span-2 xl:col-span-1">
+                                    <label class="block text-xs mb-2 font-black uppercase tracking-wider text-green-300">Aktif Bağlam</label>
+                                    <div class="w-full min-h-[48px] bg-white/5 border border-white/10 rounded-xl p-3 text-sm font-black flex items-center">
+                                        {{ currentFilterLabel || 'Veri seç' }}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <input
+                            v-model="playerName"
+                            type="text"
+                            placeholder="Adını Yaz..."
+                            class="w-full bg-black border-2 border-green-500 rounded-2xl p-5 text-3xl font-black text-center text-white outline-none"
+                        >
+
+                        <div class="grid md:grid-cols-2 gap-4">
+                            <div class="bg-white/5 p-4 rounded-2xl border border-white/10 text-left">
+                                <label class="block text-sm mb-2 font-black uppercase tracking-wider text-green-300">Round Sayısı</label>
+                                <select v-model="selectedRounds" class="w-full bg-black border border-white/10 rounded-xl p-3 text-white">
+                                    <option :value="5">5</option>
+                                    <option :value="10">10</option>
+                                    <option :value="15">15</option>
+                                    <option :value="20">20</option>
+                                </select>
+
+                                <p class="mt-3 text-xs opacity-70">
+                                    Her round bir kelime gelir, sen ve chat bu kelimenin kaç kez yazıldığını tahmin edersiniz.
+                                </p>
+                            </div>
+
+                            <div class="bg-white/5 p-4 rounded-2xl border border-white/10 text-left">
+                                <label class="block text-sm mb-2 font-black uppercase tracking-wider text-green-300">Kelime Havuzu</label>
+                                <select v-model="wordPoolMode" class="w-full bg-black border border-white/10 rounded-xl p-3 text-white">
+                                    <option value="top">En çok kullanılanlardan</option>
+                                    <option value="mid">Orta seviye kullanım</option>
+                                    <option value="mixed">Karışık</option>
+                                    <option value="rare">Nadir kelimeler</option>
+                                </select>
+
+                                <p class="mt-3 text-xs opacity-70">
+                                    Kolay sorular için üst sıralardan, zor için daha nadir kelimelerden seçebilirsin.
+                                </p>
+                            </div>
+                        </div>
+
+                        <div class="text-left bg-white/5 p-4 rounded-2xl border border-white/10 text-sm text-gray-300">
+                            <p class="font-bold text-green-400 mb-2 uppercase">Nasıl Oynanır?</p>
+                            <p>• Ekranda bir kelime çıkar.</p>
+                            <p>• Sen ve chat bu kelimenin toplam kullanım sayısını tahmin edersiniz.</p>
+                            <p>• En yakın tahmin puan kazanır.</p>
+                        </div>
+
+                        <div class="bg-black/30 border border-white/10 rounded-2xl p-5 text-left">
+                            <div class="text-[11px] uppercase tracking-widest text-gray-500 font-black mb-3">Aktif Oyun Bağlamı</div>
+                            <div class="flex flex-wrap gap-2">
+                                <span class="px-3 py-2 rounded-xl bg-green-500/10 border border-green-500/20 text-green-300 text-xs font-black uppercase tracking-wider">
+                                    {{ currentFilterLabel || 'Veri seç' }}
+                                </span>
+                                <span class="px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-gray-300 text-xs font-black uppercase tracking-wider">
+                                    Kelime Tahmin
+                                </span>
+                                <span class="px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-gray-300 text-xs font-black uppercase tracking-wider">
+                                    {{ wordPoolLabel }}
+                                </span>
+                            </div>
+                        </div>
+
+                        <div v-if="dataError" class="bg-red-500/10 border border-red-500/20 rounded-2xl p-4 text-red-300 text-sm font-bold">
+                            {{ dataError }}
+                        </div>
+
+                        <button
+                            @click="startTransition"
+                            class="w-full bg-green-600 py-6 rounded-2xl text-2xl font-black hover:bg-green-500 transition text-white uppercase disabled:opacity-40"
+                            :disabled="!playerName || !isConnected || !dataReady"
+                        >
+                            Oyunu Başlat
+                        </button>
+                    </div>
+                </div>
+
+                <div v-if="gamePhase == 'countdown'" class="h-full flex flex-col justify-center text-center animate-pulse">
+                    <h1 class="countdown-text">{{ transitionTime }}</h1>
+                    <p class="text-2xl font-black text-white uppercase italic tracking-widest">Tahmin Hazırlanıyor...</p>
+                    <p class="text-sm text-green-300 mt-4 font-black uppercase tracking-wider">{{ currentFilterLabel || 'Veri seç' }}</p>
+                </div>
+
+                <div v-if="gamePhase == 'playing'" class="space-y-6">
+                    <div class="flex justify-between items-center glass p-6 rounded-[30px] border-l-8 border-green-500">
+                        <div>
+                            <span class="font-black text-green-400 text-xl uppercase tracking-widest italic">Round {{ currentQuestionIndex + 1 }}</span>
+                            <p class="text-xs uppercase tracking-widest text-gray-400 mt-2">
+                                {{ activeQuestion.datasetLabel || currentFilterLabel || 'Veri seç' }}
+                                <span v-if="activeQuestion.metricLabel">• {{ activeQuestion.metricLabel }}</span>
+                            </p>
+                        </div>
+                        <span class="text-5xl font-black text-white italic">{{ timeLeft }} SN</span>
+                    </div>
+
+                    <div class="text-center space-y-6 py-10">
+                        <div class="inline-flex flex-wrap items-center justify-center gap-2">
+                            <span class="px-3 py-1.5 rounded-xl bg-green-500/10 border border-green-500/20 text-green-300 text-xs font-black uppercase tracking-wider">
+                                {{ activeQuestion.metricLabel || 'Kelime' }}
+                            </span>
+                            <span class="px-3 py-1.5 rounded-xl bg-white/5 border border-white/10 text-gray-300 text-xs font-black uppercase tracking-wider">
+                                {{ activeQuestion.datasetLabel || currentFilterLabel || 'Veri seç' }}
+                            </span>
+                        </div>
+
+                        <h2 class="text-3xl font-black uppercase italic text-white tracking-tight">{{ activeQuestion.title }}</h2>
+
+                        <div class="glass p-10 rounded-[40px] inline-block border-2 border-green-500 max-w-full">
+                            <template v-if="isKickEmoteWord(activeQuestion.target)">
+                                <div class="flex items-center justify-center gap-4 flex-wrap emote-target">
+                                    <img
+                                        :src="getKickEmoteUrl(activeQuestion.target)"
+                                        :alt="activeQuestion.target"
+                                        class="h-28 w-28 object-contain"
+                                        loading="lazy"
+                                        @error="handleEmoteImageError"
+                                    >
+                                    <span
+                                        v-if="getRemainingTextAfterEmote(activeQuestion.target)"
+                                        class="text-5xl md:text-7xl font-black text-white italic uppercase break-all"
+                                    >
+                                        {{ getRemainingTextAfterEmote(activeQuestion.target) }}
+                                    </span>
+                                </div>
+                            </template>
+                            <template v-else>
+                                <h3 class="text-5xl md:text-7xl font-black text-white italic uppercase break-all">
+                                    "{{ activeQuestion.target }}"
+                                </h3>
+                            </template>
+                        </div>
+
+                        <p v-if="activeQuestion.infoText" class="text-xs text-gray-500 font-bold uppercase tracking-wider">
+                            {{ activeQuestion.infoText }}
+                        </p>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-6 text-white">
+                        <div class="glass p-10 rounded-[40px] text-center border-b-8 border-green-500">
+                            <p class="text-xs font-black opacity-30 mb-4 uppercase tracking-widest">Senin Tahminin</p>
+                            <input
+                                v-model.number="myGuess"
+                                type="number"
+                                min="0"
+                                class="w-full bg-black/40 border-2 border-green-500 rounded-3xl p-6 text-6xl font-black text-center outline-none"
+                            >
+                        </div>
+
+                        <div class="glass p-10 rounded-[40px] text-center flex flex-col justify-center border-b-8 border-yellow-600">
+                            <p class="text-xs font-black opacity-30 mb-4 uppercase tracking-widest">Chat'in Son Tahmini</p>
+                            <p class="text-6xl font-black text-yellow-400">{{ lastChatGuess ?? '???' }}</p>
+                        </div>
+                    </div>
+
+                    <div class="timer-bar" :style="{ width: (timeLeft / 20 * 100) + '%' }"></div>
+                </div>
+
+                <div v-if="gamePhase == 'leaderboard'" class="space-y-8 pb-20">
+                    <div class="glass p-8 rounded-[40px] w-full border-b-8 border-green-500 shadow-2xl text-center">
+                        <p class="text-sm font-black opacity-50 uppercase mb-2">Doğru Cevap</p>
+
+                        <template v-if="isKickEmoteWord(activeQuestion.target)">
+                            <div class="flex items-center justify-center gap-4 flex-wrap mt-4">
+                                <img
+                                    :src="getKickEmoteUrl(activeQuestion.target)"
+                                    :alt="activeQuestion.target"
+                                    class="h-24 w-24 object-contain"
+                                    loading="lazy"
+                                    @error="handleEmoteImageError"
+                                >
+                                <div class="text-left">
+                                    <h3 class="text-5xl font-black text-white italic uppercase">{{ activeQuestion.correctValue }}</h3>
+                                    <p v-if="getRemainingTextAfterEmote(activeQuestion.target)" class="text-sm text-gray-300 mt-2 font-black uppercase break-all">
+                                        {{ getRemainingTextAfterEmote(activeQuestion.target) }}
+                                    </p>
+                                </div>
+                            </div>
+                        </template>
+                        <template v-else>
+                            <h3 class="text-7xl font-black text-white italic uppercase">{{ activeQuestion.correctValue }}</h3>
+                        </template>
+
+                        <p v-if="activeQuestion.infoText" class="mt-4 text-sm text-gray-300 font-bold">
+                            {{ activeQuestion.infoText }}
+                        </p>
+
+                        <p class="mt-3 text-xs uppercase tracking-widest text-gray-400">
+                            {{ activeQuestion.datasetLabel || currentFilterLabel || 'Veri seç' }}
+                            <span v-if="activeQuestion.metricLabel">• {{ activeQuestion.metricLabel }}</span>
+                        </p>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-8 w-full text-white">
+                        <div class="glass p-8 rounded-[40px] border-t-4 border-green-500">
+                            <h4 class="font-black text-green-400 mb-6 uppercase text-center italic">Round Sıralaması</h4>
+                            <div class="space-y-2 max-h-[420px] overflow-y-auto soft-scroll pr-2">
+                                <div v-for="winner in displayedRoundWinners" :key="winner.u" class="flex justify-between items-center p-3 rounded-2xl bg-white/5">
+                                    <span class="font-black text-sm break-all">{{ winner.u }}</span>
+                                    <div class="text-right">
+                                        <span class="font-black text-white text-lg">+{{ winner.p }}</span>
+                                        <p class="text-[9px] text-green-400 font-bold uppercase">Fark: {{ winner.diff }}</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="glass p-8 rounded-[40px] border-t-4 border-yellow-500 bg-yellow-500/5">
+                            <h4 class="font-black text-yellow-500 mb-6 uppercase text-center italic">Genel Puan Durumu</h4>
+                            <div class="space-y-2 max-h-[420px] overflow-y-auto soft-scroll pr-2">
+                                <div v-for="winner in displayedGlobalWinners" :key="winner.u" class="flex justify-between items-center p-3 rounded-2xl bg-white/5">
+                                    <span class="font-black text-sm break-all"><span class="opacity-30 mr-2">#{{ winner.rank }}</span>{{ winner.u }}</span>
+                                    <span class="font-black text-yellow-400 text-lg">{{ winner.total }} P</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <button
+                        @click="nextStep"
+                        class="w-full bg-green-600 py-8 rounded-[40px] text-4xl font-black shadow-2xl hover:bg-green-500 transition text-white italic uppercase"
+                    >
+                        Sıradaki Round »
+                    </button>
+                </div>
+            </div>
+        </section>
+    </main>
+</div>
+
+<script src="/assets/js/common.js"></script>
+<script src="/assets/js/game-common.js"></script>
+<script>
+RRGameFactory.create({
+    sidebarKey: 'kelimeTahmin',
+    pageTitle: 'Kelime Tahmin Oyunu',
+    defaultRounds: 10,
+
+    data() {
+        return {
+            wordPoolMode: 'mixed',
+            localFilter: getFilterState(),
+            streamOptions: [],
+            filterWarning: ''
+        };
+    },
+
+    computed: {
+        wordPoolLabel() {
+            const map = {
+                top: 'Kolay Havuz',
+                mid: 'Orta Havuz',
+                mixed: 'Karışık Havuz',
+                rare: 'Zor Havuz'
+            };
+            return map[this.wordPoolMode] || 'Karışık Havuz';
+        },
+
+        currentFilterLabel() {
+            const selectedStream =
+                this.localFilter?.mode === 'stream'
+                    ? this.streamOptions.find(s => String(s.id) === String(this.localFilter.stream_id))
+                    : null;
+
+            if (typeof getReadableFilterLabel === 'function') {
+                return getReadableFilterLabel(
+                    this.localFilter,
+                    this.dashboardMeta || {},
+                    selectedStream || null
+                );
+            }
+
+            return 'Veri seç';
+        }
+    },
+
+    methods: {
+        isKickEmoteWord(word) {
+            return /emote\d+[a-zA-Z]*/i.test(String(word || '').trim());
+        },
+
+        getKickEmoteId(word) {
+            const match = String(word || '').trim().match(/emote(\d+)/i);
+            return match ? match[1] : null;
+        },
+
+        getRemainingTextAfterEmote(word) {
+            return String(word || '')
+                .replace(/emote\d+[a-zA-Z]*/ig, '')
+                .trim();
+        },
+
+        getKickEmoteUrl(word) {
+            const id = this.getKickEmoteId(word);
+            return id ? `https://files.kick.com/emotes/${id}/fullsize` : '';
+        },
+
+        handleEmoteImageError(event) {
+            const el = event?.target;
+            if (!el) return;
+            el.style.display = 'none';
+        },
+
+        formatStreamLabel(stream) {
+            if (!stream) return 'Yayın seç';
+
+            if (stream.display_label) return stream.display_label;
+
+            if (stream.label_date) {
+                const suffix = stream.session_type === 'offstream' ? 'offstream' : 'yayını';
+                return `${formatHumanDate(stream.label_date)} ${suffix}`;
+            }
+
+            const date = stream.started_at
+                ? new Date(stream.started_at).toLocaleDateString('tr-TR')
+                : '-';
+
+            const started = stream.started_at
+                ? new Date(stream.started_at).toLocaleTimeString('tr-TR', {
+                    hour: '2-digit',
+                    minute: '2-digit'
+                })
+                : '--:--';
+
+            return `${date} · ${started}`;
+        },
+
+        normalizeLocalFilter() {
+            const f = {
+                mode: this.localFilter?.mode || 'live',
+                stream_id: this.localFilter?.stream_id || '',
+                date: this.localFilter?.date || '',
+                month: this.localFilter?.month || ''
+            };
+
+            if (f.mode !== 'stream') f.stream_id = '';
+            if (f.mode !== 'day' && f.mode !== 'offstream_day') f.date = '';
+            if (f.mode !== 'month') f.month = '';
+
+            this.localFilter = f;
+            return f;
+        },
+
+        syncWordGameFilterToGameState() {
+            const f = this.normalizeLocalFilter();
+
+            this.selectedDataMode = f.mode;
+            this.selectedDataDate = f.date;
+            this.selectedDataMonth = f.month;
+            this.selectedDataStreamId = f.stream_id;
+
+            this.currentFilterState = {
+                mode: f.mode,
+                date: f.date,
+                month: f.month,
+                stream_id: f.stream_id
+            };
+
+            this.filterContextLabel = this.currentFilterLabel || 'Veri seç';
+
+            if (typeof setFilterState === 'function') {
+                setFilterState({ ...f });
+            }
+        },
+        async fetchStreamsForSelect(force = false) {
+            try {
+                if (!force && Array.isArray(this.streamOptions) && this.streamOptions.length > 0) {
+                    if (this.localFilter.mode === 'stream' && !this.localFilter.stream_id) {
+                        this.localFilter.stream_id = String(this.streamOptions[0].id);
+                    }
+                    return;
+                }
+
+                if (typeof fetchStreams !== 'function') {
+                    throw new Error('Ortak stream yükleyici bulunamadı');
+                }
+
+                const streams = await fetchStreams(100);
+                this.streamOptions = Array.isArray(streams) ? streams : [];
+
+                if (this.localFilter.mode === 'stream') {
+                    const hasSelectedStream = this.streamOptions.some(
+                        s => String(s.id) === String(this.localFilter.stream_id || '')
+                    );
+
+                    if (!this.localFilter.stream_id || !hasSelectedStream) {
+                        this.localFilter.stream_id = this.streamOptions.length > 0
+                            ? String(this.streamOptions[0].id)
+                            : '';
+                    }
+                }
+            } catch (err) {
+                console.error('stream listesi alınamadı', err);
+                this.streamOptions = [];
+            }
+        },
+
+        async forceReloadWordGameData(showAlertOnError = false) {
+            try {
+                this.filterWarning = '';
+                this.syncWordGameFilterToGameState();
+
+                if (typeof this.loadGameData === 'function') {
+                    await this.loadGameData(showAlertOnError);
+                } else {
+                    const result = await loadDashboardData(this.currentFilterState);
+                    const transformed = result?.transformed || {};
+
+                    this.stats = transformed.stats || {};
+                    this.users = transformed.users || [];
+                    this.words = transformed.words || [];
+                    this.emotes = transformed.emotes || [];
+                    this.spam = transformed.spam || [];
+                    this.moderation = transformed.moderation || { summary: {}, mods: [], recent_actions: [] };
+                    this.gameSpecial = transformed.gameSpecial || transformed.game_special || {
+                        all_pool: [],
+                        top_5_users: [],
+                        top_5_words: [],
+                        top_5_emotes: []
+                    };
+                    this.rawEvents = transformed.rawEvents || [];
+                    this.dashboardMeta = result?.apiData?.meta || {};
+                    this.dataReady = true;
+                }
+
+                this.filterWarning = this.dashboardMeta?.warning || '';
+                this.filterContextLabel = this.currentFilterLabel || 'Veri seç';
+
+                if (this.activeQuestion && this.activeQuestion.title) {
+                    this.activeQuestion.datasetLabel = this.currentFilterLabel || 'Veri seç';
+                }
+            } catch (err) {
+                console.error('kelime tahmin veri yenileme hatası:', err);
+                this.filterWarning = err?.message || 'Veri güncellenemedi.';
+                if (showAlertOnError) {
+                    alert(this.filterWarning);
+                }
+            }
+        },
+        async handleModeChange() {
+            this.normalizeLocalFilter();
+
+            if (this.localFilter.mode === 'stream') {
+                await this.fetchStreamsForSelect(true);
+
+                if (!this.localFilter.stream_id && this.streamOptions.length > 0) {
+                    this.localFilter.stream_id = String(this.streamOptions[0].id);
+                }
+            }
+
+            await this.handleFilterChange();
+        },
+        async handleFilterChange() {
+            this.normalizeLocalFilter();
+
+            if (this.localFilter.mode === 'stream') {
+                if (!Array.isArray(this.streamOptions) || this.streamOptions.length === 0) {
+                    await this.fetchStreamsForSelect(true);
+                }
+
+                if (!this.localFilter.stream_id && this.streamOptions.length > 0) {
+                    this.localFilter.stream_id = String(this.streamOptions[0].id);
+                }
+
+                if (!this.localFilter.stream_id) {
+                    this.filterWarning = 'Yayın listesi henüz yüklenemedi. Biraz sonra tekrar dene.';
+                    return;
+                }
+            }
+
+            await this.forceReloadWordGameData(false);
+        }
+    },
+
+    async mounted() {
+        this.localFilter = getFilterState();
+        this.normalizeLocalFilter();
+
+        await this.fetchStreamsForSelect(true);
+        this.syncWordGameFilterToGameState();
+        await this.forceReloadWordGameData(false);
+
+        window.addEventListener('storage', async (event) => {
+            if (event.key === 'rr_shared_filter_state_v1') {
+                this.localFilter = getFilterState();
+                this.normalizeLocalFilter();
+                await this.fetchStreamsForSelect(true);
+                this.syncWordGameFilterToGameState();
+                await this.forceReloadWordGameData(false);
+            }
+        });
+    },
+
+    buildQuestion() {
+        const specialPool = Array.isArray(this.gameSpecial?.all_pool) ? [...this.gameSpecial.all_pool] : [];
+        const fallbackWords = Array.isArray(this.words)
+            ? this.words.map(w => ({
+                w: w.w,
+                c: w.c,
+                top: w.top || []
+            }))
+            : [];
+
+        let source = specialPool.length ? specialPool : fallbackWords;
+
+        if (!source.length) {
+            return {
+                type: 'guess',
+                metric: 'words',
+                title: 'bu kelime kaç kez yazıldı?',
+                target: 'VERİ YOK',
+                correct: 0,
+                correctValue: '0 Kez',
+                infoText: 'Seçili filtre için kelime verisi bulunamadı.'
+            };
+        }
+
+        const sorted = [...source].sort((a, b) => (b.c || 0) - (a.c || 0));
+        const len = sorted.length;
+
+        let pool = sorted;
+
+        if (this.wordPoolMode === 'top') {
+            pool = sorted.slice(0, Math.max(10, Math.ceil(len * 0.25)));
+        } else if (this.wordPoolMode === 'mid') {
+            const start = Math.floor(len * 0.2);
+            const end = Math.max(start + 10, Math.floor(len * 0.7));
+            pool = sorted.slice(start, end);
+        } else if (this.wordPoolMode === 'rare') {
+            pool = sorted.slice(Math.max(0, Math.floor(len * 0.6)));
+        } else {
+            const top = sorted.slice(0, Math.max(6, Math.ceil(len * 0.2)));
+            const mid = sorted.slice(Math.floor(len * 0.2), Math.max(Math.floor(len * 0.7), 10));
+            const rare = sorted.slice(Math.max(0, Math.floor(len * 0.7)));
+            pool = [...top, ...mid.slice(0, 15), ...rare.slice(0, 10)];
+        }
+
+        if (!pool.length) {
+            pool = sorted;
+        }
+
+        const rw = pool[Math.floor(Math.random() * pool.length)] || sorted[0];
+        const topUsers = Array.isArray(rw?.top) ? rw.top : [];
+
+        const infoBits = [];
+        if (topUsers.length) {
+            infoBits.push(`En çok kullananlar: ${this.formatTopList(topUsers)}`);
+        }
+        if ((rw?.c || 0) >= 100) {
+            infoBits.push('Yüksek kullanım kelimesi');
+        } else if ((rw?.c || 0) <= 10) {
+            infoBits.push('Nadir kelime');
+        }
+
+        return {
+            type: 'guess',
+            metric: 'words',
+            title: 'bu kelime kaç kez yazıldı?',
+            target: rw?.w || 'VERİ YOK',
+            correct: rw?.c || 0,
+            correctValue: `${rw?.c || 0} Kez`,
+            infoText: infoBits.join(' • ')
+        };
+    }
+}).mount('#app');
+</script>
+</body>
+</html>

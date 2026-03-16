@@ -1,0 +1,757 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Doğru / Yanlış</title>
+
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/assets/css/style.css">
+    <style>
+        .timer-bar { transition: width 1s linear; background: #38bdf8; height: 12px; border-radius: 6px; box-shadow: 0 0 20px #38bdf8; }
+        .countdown-text { font-size: 11rem; font-weight: 900; color: #38bdf8; text-shadow: 0 0 60px #38bdf8; line-height: 1; }
+        .my-selection { border: 4px solid #38bdf8 !important; background: rgba(56, 189, 248, 0.12); }
+        .correct-answer { border: 4px solid #22c55e !important; background: #14532d !important; transform: scale(1.02); }
+        .wrong-answer { border: 4px solid #ef4444 !important; opacity: 0.55; }
+        .chat-emote { height: 3rem; width: auto; display: inline-block; vertical-align: middle; margin: 0 5px; }
+        .soft-scroll::-webkit-scrollbar { width: 6px; }
+        .soft-scroll::-webkit-scrollbar-thumb { background: #38bdf8; border-radius: 999px; }
+        .soft-scroll::-webkit-scrollbar-track { background: transparent; }
+    </style>
+</head>
+<body>
+<div id="app" class="flex h-screen overflow-hidden">
+    <div v-html="sidebar"></div>
+
+    <main class="flex-1 flex flex-col overflow-hidden relative">
+        <header class="p-6 border-b border-white/5 flex justify-between items-center bg-[#05070a]">
+            <div>
+                <h2 class="text-xl font-black text-sky-400 uppercase italic">{{ pageTitle }}</h2>
+                <p class="text-xs text-gray-400 mt-1 uppercase tracking-wider">
+                    {{ currentModeLabel || currentFilterLabel || 'Veri seç' }}
+                </p>
+            </div>
+
+            <div class="flex items-center gap-2 text-xs font-black uppercase tracking-wider">
+                <span class="w-2.5 h-2.5 rounded-full" :class="isConnected ? 'bg-green-400' : 'bg-red-500'"></span>
+                <span :class="isConnected ? 'text-green-400' : 'text-red-400'">
+                    {{ isConnected ? 'Chat Aktif' : 'Chat Bağlanıyor' }}
+                </span>
+            </div>
+        </header>
+
+        <section class="page-section flex-1 p-8 scroll-flat overflow-y-auto">
+            <div class="max-w-6xl mx-auto min-h-full">
+                <div v-if="gamePhase == 'lobby'" class="h-full flex flex-col justify-center text-center space-y-8">
+                    <h2 class="text-7xl font-black italic text-sky-400 uppercase tracking-tighter">DOĞRU / YANLIŞ</h2>
+
+                    <div class="glass p-10 rounded-[50px] max-w-4xl mx-auto space-y-6 border-t-8 border-sky-500 shadow-2xl">
+                        <div class="grid md:grid-cols-2 gap-4 text-left">
+                            <div class="bg-white/5 p-4 rounded-2xl border border-white/10">
+                                <div class="text-[10px] uppercase tracking-widest text-gray-500 font-black mb-2">Veri Bağlamı</div>
+                                <div class="text-lg font-black text-sky-300">{{ currentFilterLabel || 'Veri seç' }}</div>
+                                <div class="text-xs opacity-60 mt-2">
+                                    Sorular seçtiğin veri moduna göre hazırlanır.
+                                </div>
+                            </div>
+
+                            <div class="bg-white/5 p-4 rounded-2xl border border-white/10">
+                                <div class="text-[10px] uppercase tracking-widest text-gray-500 font-black mb-2">Veri Durumu</div>
+                                <div class="text-lg font-black" :class="dataReady ? 'text-green-400' : 'text-yellow-400'">
+                                    {{ dataReady ? 'Hazır' : 'Yükleniyor' }}
+                                </div>
+                                <div class="text-xs opacity-60 mt-2">
+                                    Users: {{ users.length }} • Words: {{ words.length }} • Emotes: {{ emotes.length }} • Spam: {{ spam.length }}
+                                </div>
+                            </div>
+                        </div>
+
+                        <div
+                            v-if="filterWarning"
+                            class="bg-yellow-500/10 border border-yellow-500/20 rounded-2xl p-4 text-yellow-300 text-sm font-bold text-left"
+                        >
+                            <i class="fa fa-triangle-exclamation mr-2"></i>
+                            {{ filterWarning }}
+                        </div>
+
+                        <div class="bg-black/30 border border-white/10 rounded-2xl p-5 text-left">
+                            <div class="text-[11px] uppercase tracking-widest text-gray-500 font-black mb-4">Veri Seçimi</div>
+
+                            <div class="grid md:grid-cols-2 xl:grid-cols-4 gap-4">
+                                <div>
+                                    <label class="block text-xs mb-2 font-black uppercase tracking-wider text-sky-300">Veri Modu</label>
+                                    <select
+                                        v-model="localFilter.mode"
+                                        @change="handleModeChange"
+                                        class="w-full bg-black border border-white/10 rounded-xl p-3 text-white"
+                                    >
+                                        <option value="live">Canlı Yayın</option>
+                                        <option value="offstream_live">Canlı Offstream</option>
+                                        <option value="stream">Yayın Seç</option>
+                                        <option value="day">Gün Seç</option>
+                                        <option value="offstream_day">Offstream Gün</option>
+                                        <option value="week">Son 7 Gün</option>
+                                        <option value="month">Ay Seç</option>
+                                        <option value="all">Tüm Zamanlar</option>
+                                    </select>
+                                </div>
+
+                                <div v-if="localFilter.mode === 'stream'">
+                                    <label class="block text-xs mb-2 font-black uppercase tracking-wider text-sky-300">Yayın</label>
+                                    <select
+                                        v-model="localFilter.stream_id"
+                                        @change="handleFilterChange"
+                                        class="w-full bg-black border border-white/10 rounded-xl p-3 text-white"
+                                    >
+                                        <option value="">Yayın seç</option>
+                                        <option v-for="s in streamOptions" :key="String(s.id)" :value="String(s.id)">
+                                            {{ formatStreamLabel(s) }}
+                                        </option>
+                                    </select>
+                                </div>
+
+                                <div v-if="localFilter.mode === 'day' || localFilter.mode === 'offstream_day'">
+                                    <label class="block text-xs mb-2 font-black uppercase tracking-wider text-sky-300">
+                                        {{ localFilter.mode === 'offstream_day' ? 'Offstream Gün' : 'Gün' }}
+                                    </label>
+                                    <input
+                                        v-model="localFilter.date"
+                                        @change="handleFilterChange"
+                                        type="date"
+                                        class="w-full bg-black border border-white/10 rounded-xl p-3 text-white"
+                                    >
+                                </div>
+
+                                <div v-if="localFilter.mode === 'month'">
+                                    <label class="block text-xs mb-2 font-black uppercase tracking-wider text-sky-300">Ay</label>
+                                    <input
+                                        v-model="localFilter.month"
+                                        @change="handleFilterChange"
+                                        type="month"
+                                        class="w-full bg-black border border-white/10 rounded-xl p-3 text-white"
+                                    >
+                                </div>
+
+                                <div class="md:col-span-2 xl:col-span-1">
+                                    <label class="block text-xs mb-2 font-black uppercase tracking-wider text-sky-300">Aktif Bağlam</label>
+                                    <div class="w-full min-h-[48px] bg-white/5 border border-white/10 rounded-xl p-3 text-sm font-black flex items-center">
+                                        {{ currentFilterLabel || 'Veri seç' }}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <input
+                            v-model="playerName"
+                            type="text"
+                            placeholder="Adını Yaz..."
+                            class="w-full bg-black border-2 border-sky-500 rounded-2xl p-5 text-3xl font-black text-center text-white outline-none"
+                        >
+
+                        <div class="grid md:grid-cols-2 gap-4">
+                            <div class="bg-white/5 p-4 rounded-2xl border border-white/10 text-left">
+                                <label class="block text-sm mb-2 font-black uppercase tracking-wider text-sky-300">Round Sayısı</label>
+                                <select v-model="selectedRounds" class="w-full bg-black border border-white/10 rounded-xl p-3">
+                                    <option :value="5">5</option>
+                                    <option :value="10">10</option>
+                                    <option :value="15">15</option>
+                                    <option :value="20">20</option>
+                                </select>
+                                <p class="mt-3 text-xs opacity-70">Her round bir ifadeyi doğru mu yanlış mı diye sorar.</p>
+                            </div>
+
+                            <div class="bg-white/5 p-4 rounded-2xl border border-white/10 text-left">
+                                <label class="block text-sm mb-2 font-black uppercase tracking-wider text-sky-300">Soru Havuzu</label>
+                                <select v-model="questionMetric" class="w-full bg-black border border-white/10 rounded-xl p-3">
+                                    <option value="auto">Karışık</option>
+                                    <option value="users">Kullanıcı</option>
+                                    <option value="words">Kelime</option>
+                                    <option value="emotes">Emoji</option>
+                                    <option value="spam">Spam</option>
+                                    <option value="moderation">Moderasyon</option>
+                                </select>
+                                <p class="mt-3 text-xs opacity-70">İstersen tek veri tipinden, istersen karışık sorular gelsin.</p>
+                            </div>
+                        </div>
+
+                        <div class="bg-black/30 border border-white/10 rounded-2xl p-5 text-left">
+                            <div class="text-[11px] uppercase tracking-widest text-gray-500 font-black mb-3">Aktif Oyun Bağlamı</div>
+                            <div class="flex flex-wrap gap-2">
+                                <span class="px-3 py-2 rounded-xl bg-sky-500/10 border border-sky-500/20 text-sky-300 text-xs font-black uppercase tracking-wider">
+                                    {{ currentFilterLabel || 'Veri seç' }}
+                                </span>
+                                <span class="px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-gray-300 text-xs font-black uppercase tracking-wider">
+                                    {{ getMetricLabel(questionMetric) }}
+                                </span>
+                            </div>
+                        </div>
+
+                        <div v-if="dataError" class="bg-red-500/10 border border-red-500/20 rounded-2xl p-4 text-red-300 text-sm font-bold">
+                            {{ dataError }}
+                        </div>
+
+                        <button
+                            @click="startTransition"
+                            class="w-full bg-sky-500 py-6 rounded-2xl text-2xl font-black hover:bg-sky-400 transition text-black uppercase disabled:opacity-40"
+                            :disabled="!playerName || !isConnected || !dataReady"
+                        >
+                            Oyunu Başlat
+                        </button>
+                    </div>
+                </div>
+
+                <div v-if="gamePhase == 'countdown'" class="h-full flex flex-col justify-center text-center animate-pulse">
+                    <h1 class="countdown-text">{{ transitionTime }}</h1>
+                    <p class="text-2xl font-black text-white uppercase italic tracking-widest">Soru Hazırlanıyor...</p>
+                    <p class="text-sm text-sky-300 mt-4 font-black uppercase tracking-wider">{{ currentFilterLabel || 'Veri seç' }}</p>
+                </div>
+
+                <div v-if="gamePhase == 'playing'" class="space-y-6">
+                    <div class="flex justify-between items-center glass p-6 rounded-[30px] border-l-8 border-sky-500">
+                        <div>
+                            <span class="font-black text-sky-400 text-xl uppercase tracking-widest italic">Round {{ currentQuestionIndex + 1 }}</span>
+                            <p class="text-xs uppercase tracking-widest text-gray-400 mt-2">
+                                {{ activeQuestion.datasetLabel || currentFilterLabel || 'Veri seç' }}
+                                <span v-if="activeQuestion.metricLabel">• {{ activeQuestion.metricLabel }}</span>
+                            </p>
+                        </div>
+                        <span class="text-5xl font-black text-white italic">{{ timeLeft }} SN</span>
+                    </div>
+
+                    <div class="text-center space-y-4 py-10">
+                        <div class="inline-flex flex-wrap justify-center gap-2">
+                            <span class="px-3 py-1.5 rounded-xl bg-sky-500/10 border border-sky-500/20 text-sky-300 text-xs font-black uppercase tracking-wider">
+                                {{ activeQuestion.metricLabel || 'Genel' }}
+                            </span>
+                            <span class="px-3 py-1.5 rounded-xl bg-white/5 border border-white/10 text-gray-300 text-xs font-black uppercase tracking-wider">
+                                {{ activeQuestion.datasetLabel || currentFilterLabel || 'Veri seç' }}
+                            </span>
+                        </div>
+
+                        <h2 class="text-4xl md:text-5xl font-black uppercase italic text-white tracking-tight leading-tight" v-html="activeQuestion.title"></h2>
+                    </div>
+
+                    <div class="grid grid-cols-1 gap-3">
+                        <div
+                            v-for="(opt, i) in activeQuestion.options"
+                            :key="i"
+                            @click="selectAnswer(i+1)"
+                            :class="{
+                                'my-selection': mySelection == (i+1) && !showAnswers,
+                                'correct-answer': showAnswers && (i+1) == activeQuestion.correctIndex,
+                                'wrong-answer': showAnswers && (i+1) != activeQuestion.correctIndex && mySelection == (i+1)
+                            }"
+                            class="glass p-5 rounded-[25px] flex justify-between items-center cursor-pointer hover:bg-white/10 transition text-white"
+                        >
+                            <div class="flex items-center gap-6">
+                                <span class="w-14 h-14 bg-sky-500 text-black rounded-2xl flex items-center justify-center font-black text-3xl shadow-xl italic">
+                                    {{ i+1 }}
+                                </span>
+                                <span class="text-2xl font-bold uppercase italic break-all" v-html="opt.n"></span>
+                            </div>
+
+                            <div class="text-right px-6">
+                                <p class="text-3xl font-black text-sky-400">{{ votes[i+1] || 0 }}</p>
+                                <p class="text-[10px] opacity-40 uppercase font-black tracking-tighter">Chat Oyu</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="timer-bar" :style="{ width: (timeLeft / 20 * 100) + '%' }"></div>
+                </div>
+
+                <div v-if="gamePhase == 'leaderboard'" class="space-y-8 pb-20">
+                    <div class="glass p-8 rounded-[40px] border-b-8 border-green-500 shadow-2xl text-center">
+                        <p class="text-sm font-black opacity-50 uppercase mb-2">Doğru Cevap</p>
+                        <h3 class="text-5xl font-black text-white italic uppercase break-all">{{ activeQuestion.correctValue }}</h3>
+                        <p v-if="activeQuestion.infoText" class="mt-4 text-xl text-sky-300 font-black" v-html="activeQuestion.infoText"></p>
+                        <p class="mt-3 text-xs uppercase tracking-widest text-gray-400">
+                            {{ activeQuestion.datasetLabel || currentFilterLabel || 'Veri seç' }}
+                            <span v-if="activeQuestion.metricLabel">• {{ activeQuestion.metricLabel }}</span>
+                        </p>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-8 w-full text-white">
+                        <div class="glass p-8 rounded-[40px] border-t-4 border-sky-500">
+                            <h4 class="font-black text-sky-400 mb-6 uppercase text-center italic">Round Sıralaması</h4>
+                            <div class="space-y-2 max-h-[420px] overflow-y-auto soft-scroll pr-2">
+                                <div v-for="winner in displayedRoundWinners" :key="winner.u" class="flex justify-between items-center p-3 rounded-2xl bg-white/5">
+                                    <span class="font-black text-sm break-all">{{ winner.u }}</span>
+                                    <span class="font-black text-white text-lg">+{{ winner.p }}</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="glass p-8 rounded-[40px] border-t-4 border-yellow-500 bg-yellow-500/5">
+                            <h4 class="font-black text-yellow-500 mb-6 uppercase text-center italic">Genel Puan Durumu</h4>
+                            <div class="space-y-2 max-h-[420px] overflow-y-auto soft-scroll pr-2">
+                                <div v-for="winner in displayedGlobalWinners" :key="winner.u" class="flex justify-between items-center p-3 rounded-2xl bg-white/5">
+                                    <span class="font-black text-sm break-all"><span class="opacity-30 mr-2">#{{ winner.rank }}</span>{{ winner.u }}</span>
+                                    <span class="font-black text-yellow-400 text-lg">{{ winner.total }} P</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <button
+                        @click="nextStep"
+                        class="w-full bg-sky-500 py-8 rounded-[40px] text-4xl font-black shadow-2xl hover:bg-sky-400 transition text-black italic uppercase"
+                    >
+                        Sıradaki Round »
+                    </button>
+                </div>
+            </div>
+        </section>
+    </main>
+</div>
+
+<script src="/assets/js/common.js"></script>
+<script src="/assets/js/game-common.js"></script>
+<script>
+RRGameFactory.create({
+    sidebarKey: 'dogruYanlis',
+    pageTitle: 'Doğru / Yanlış Oyunu',
+    defaultRounds: 10,
+
+    data() {
+        return {
+            localFilter: getFilterState(),
+            streamOptions: [],
+            filterWarning: ''
+        };
+    },
+
+    computed: {
+        currentFilterLabel() {
+            const selectedStream =
+                this.localFilter?.mode === 'stream'
+                    ? this.streamOptions.find(s => String(s.id) === String(this.localFilter.stream_id))
+                    : null;
+
+            if (typeof getReadableFilterLabel === 'function') {
+                return getReadableFilterLabel(
+                    this.localFilter,
+                    this.dashboardMeta || {},
+                    selectedStream || null
+                );
+            }
+
+            return 'Veri seç';
+        }
+    },
+
+    methods: {
+        isKickEmoteWord(word) {
+            return /emote\d+[a-zA-Z]*/i.test(String(word || '').trim());
+        },
+
+        getKickEmoteId(word) {
+            const match = String(word || '').trim().match(/emote(\d+)/i);
+            return match ? match[1] : null;
+        },
+
+        getRemainingTextAfterEmote(word) {
+            return String(word || '')
+                .replace(/emote\d+[a-zA-Z]*/ig, '')
+                .trim();
+        },
+
+        getKickEmoteUrl(word) {
+            const id = this.getKickEmoteId(word);
+            return id ? `https://files.kick.com/emotes/${id}/fullsize` : '';
+        },
+
+        formatStreamLabel(stream) {
+            if (!stream) return 'Yayın seç';
+
+            if (stream.display_label) return stream.display_label;
+
+            if (stream.label_date) {
+                const suffix = stream.session_type === 'offstream' ? 'offstream' : 'yayını';
+                return `${formatHumanDate(stream.label_date)} ${suffix}`;
+            }
+
+            const date = stream.started_at
+                ? new Date(stream.started_at).toLocaleDateString('tr-TR')
+                : '-';
+
+            const started = stream.started_at
+                ? new Date(stream.started_at).toLocaleTimeString('tr-TR', {
+                    hour: '2-digit',
+                    minute: '2-digit'
+                })
+                : '--:--';
+
+            return `${date} · ${started}`;
+        },
+
+        normalizeLocalFilter() {
+            const f = {
+                mode: this.localFilter?.mode || 'live',
+                stream_id: this.localFilter?.stream_id || '',
+                date: this.localFilter?.date || '',
+                month: this.localFilter?.month || ''
+            };
+
+            if (f.mode !== 'stream') f.stream_id = '';
+            if (f.mode !== 'day' && f.mode !== 'offstream_day') f.date = '';
+            if (f.mode !== 'month') f.month = '';
+
+            this.localFilter = f;
+            return f;
+        },
+
+        syncTrueFalseFilterToGameState() {
+            const f = this.normalizeLocalFilter();
+
+            this.selectedDataMode = f.mode;
+            this.selectedDataDate = f.date;
+            this.selectedDataMonth = f.month;
+            this.selectedDataStreamId = f.stream_id;
+
+            this.currentFilterState = {
+                mode: f.mode,
+                date: f.date,
+                month: f.month,
+                stream_id: f.stream_id
+            };
+
+            this.filterContextLabel = this.currentFilterLabel || 'Veri seç';
+
+            if (typeof setFilterState === 'function') {
+                setFilterState({ ...f });
+            }
+        },
+        async fetchStreamsForSelect(force = false) {
+            try {
+                if (!force && Array.isArray(this.streamOptions) && this.streamOptions.length > 0) {
+                    if (this.localFilter.mode === 'stream' && !this.localFilter.stream_id) {
+                        this.localFilter.stream_id = String(this.streamOptions[0].id);
+                    }
+                    return;
+                }
+
+                if (typeof fetchStreams !== 'function') {
+                    throw new Error('Ortak stream yükleyici bulunamadı');
+                }
+
+                const streams = await fetchStreams(100);
+                this.streamOptions = Array.isArray(streams) ? streams : [];
+
+                if (this.localFilter.mode === 'stream') {
+                    const hasSelectedStream = this.streamOptions.some(
+                        s => String(s.id) === String(this.localFilter.stream_id || '')
+                    );
+
+                    if (!this.localFilter.stream_id || !hasSelectedStream) {
+                        this.localFilter.stream_id = this.streamOptions.length > 0
+                            ? String(this.streamOptions[0].id)
+                            : '';
+                    }
+                }
+            } catch (err) {
+                console.error('stream listesi alınamadı', err);
+                this.streamOptions = [];
+            }
+        },
+
+        async forceReloadTrueFalseData(showAlertOnError = false) {
+            try {
+                this.filterWarning = '';
+                this.syncTrueFalseFilterToGameState();
+
+                if (typeof this.loadGameData === 'function') {
+                    await this.loadGameData(showAlertOnError);
+                } else {
+                    const result = await loadDashboardData(this.currentFilterState);
+                    const transformed = result?.transformed || {};
+
+                    this.stats = transformed.stats || {};
+                    this.users = transformed.users || [];
+                    this.words = transformed.words || [];
+                    this.emotes = transformed.emotes || [];
+                    this.spam = transformed.spam || [];
+                    this.moderation = transformed.moderation || { summary: {}, mods: [], recent_actions: [] };
+                    this.gameSpecial = transformed.gameSpecial || transformed.game_special || {
+                        all_pool: [],
+                        top_5_users: [],
+                        top_5_words: [],
+                        top_5_emotes: []
+                    };
+                    this.rawEvents = transformed.rawEvents || [];
+                    this.dashboardMeta = result?.apiData?.meta || {};
+                    this.dataReady = true;
+                }
+
+                this.filterWarning = this.dashboardMeta?.warning || '';
+                this.filterContextLabel = this.currentFilterLabel || 'Veri seç';
+
+                if (this.activeQuestion && this.activeQuestion.title) {
+                    this.activeQuestion.datasetLabel = this.currentFilterLabel || 'Veri seç';
+                }
+            } catch (err) {
+                console.error('doğru yanlış veri yenileme hatası:', err);
+                this.filterWarning = err?.message || 'Veri güncellenemedi.';
+                if (showAlertOnError) {
+                    alert(this.filterWarning);
+                }
+            }
+        },
+        async handleModeChange() {
+            this.normalizeLocalFilter();
+
+            if (this.localFilter.mode === 'stream') {
+                await this.fetchStreamsForSelect(true);
+
+                if (!this.localFilter.stream_id && this.streamOptions.length > 0) {
+                    this.localFilter.stream_id = String(this.streamOptions[0].id);
+                }
+            }
+
+            await this.handleFilterChange();
+        },
+        async handleFilterChange() {
+            this.normalizeLocalFilter();
+
+            if (this.localFilter.mode === 'stream') {
+                if (!Array.isArray(this.streamOptions) || this.streamOptions.length === 0) {
+                    await this.fetchStreamsForSelect(true);
+                }
+
+                if (!this.localFilter.stream_id && this.streamOptions.length > 0) {
+                    this.localFilter.stream_id = String(this.streamOptions[0].id);
+                }
+
+                if (!this.localFilter.stream_id) {
+                    this.filterWarning = 'Yayın listesi henüz yüklenemedi. Biraz sonra tekrar dene.';
+                    return;
+                }
+            }
+
+            await this.forceReloadTrueFalseData(false);
+        }
+    },
+
+    async mounted() {
+        this.localFilter = getFilterState();
+        this.normalizeLocalFilter();
+
+        await this.fetchStreamsForSelect(true);
+        this.syncTrueFalseFilterToGameState();
+        await this.forceReloadTrueFalseData(false);
+
+        window.addEventListener('storage', async (event) => {
+            if (event.key === 'rr_shared_filter_state_v1') {
+                this.localFilter = getFilterState();
+                this.normalizeLocalFilter();
+                await this.fetchStreamsForSelect(true);
+                this.syncTrueFalseFilterToGameState();
+                await this.forceReloadTrueFalseData(false);
+            }
+        });
+    },
+
+    buildQuestion() {
+        const randomPick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+        const parse = (text) => typeof parseMessage === 'function' ? parseMessage(text) : text;
+
+        const modsSafe = (this.moderation?.mods || []).filter(m => {
+            const n = String(m.n || '').toLowerCase();
+            return !['unknown mod', 'system/bot', 'botrix'].includes(n);
+        });
+
+        const timeoutUsers = (this.users || [])
+            .filter(u => (u.mod_received?.timeouts || 0) > 0)
+            .sort((a, b) => (b.mod_received?.timeouts || 0) - (a.mod_received?.timeouts || 0));
+
+        const banUsers = (this.users || [])
+            .filter(u => (u.mod_received?.bans || 0) > 0)
+            .sort((a, b) => (b.mod_received?.bans || 0) - (a.mod_received?.bans || 0));
+
+        const twoOptionAnswers = [
+            { n: 'DOĞRU' },
+            { n: 'YANLIŞ' }
+        ];
+
+        const metric = this.questionMetric || 'auto';
+        const builders = [];
+
+        if (metric === 'auto' || metric === 'words') {
+            if (this.words.length >= 2) {
+                builders.push(() => {
+                    const pair = this.shuffle(this.words.slice(0, 40)).slice(0, 2);
+                    const a = pair[0], b = pair[1];
+                    const truth = (a?.c || 0) > (b?.c || 0);
+
+                    return {
+                        type: 'quiz',
+                        metric: 'words',
+                        title: `<span class="text-sky-400">"${a?.w || '-'}"</span> kelimesi, <span class="text-pink-400">"${b?.w || '-'}"</span> kelimesinden daha fazla kullanıldı.`,
+                        options: twoOptionAnswers,
+                        correctIndex: truth ? 1 : 2,
+                        correctValue: truth ? 'DOĞRU' : 'YANLIŞ',
+                        infoText: `"${a?.w || '-'}": ${a?.c || 0} kez • "${b?.w || '-'}": ${b?.c || 0} kez`
+                    };
+                });
+            }
+        }
+
+        if (metric === 'auto' || metric === 'emotes') {
+            if (this.emotes.length >= 1) {
+                builders.push(() => {
+                    const e = randomPick(this.emotes.slice(0, 30));
+                    const uniqueUsers = Number(e?.unique_users ?? e?.uniqueUsers ?? (Array.isArray(e?.top) ? e.top.length : 0) ?? 0);
+                    const threshold = Math.max(5, Math.floor(uniqueUsers * 0.7));
+                    const truth = uniqueUsers > threshold;
+                    const emojiHtml = parse(`[emote:${e?.id}:${e?.n}]`);
+
+                    return {
+                        type: 'quiz',
+                        metric: 'emotes',
+                        title: `${emojiHtml} emojisi <span class="text-yellow-400">${threshold}</span> kişiden fazla farklı kullanıcı tarafından kullanıldı.`,
+                        options: twoOptionAnswers,
+                        correctIndex: truth ? 1 : 2,
+                        correctValue: truth ? 'DOĞRU' : 'YANLIŞ',
+                        infoText: `${emojiHtml} toplam ${uniqueUsers} farklı kişi tarafından kullanıldı.`
+                    };
+                });
+            }
+
+            if (this.emotes.length >= 2) {
+                builders.push(() => {
+                    const pair = this.shuffle(this.emotes.slice(0, 35)).slice(0, 2);
+                    const a = pair[0], b = pair[1];
+                    const truth = (a?.c || 0) > (b?.c || 0);
+
+                    return {
+                        type: 'quiz',
+                        metric: 'emotes',
+                        title: `<span class="text-yellow-400">${a?.n || '-'}</span> emojisi, <span class="text-pink-400">${b?.n || '-'}</span> emojisinden daha fazla kullanıldı.`,
+                        options: twoOptionAnswers,
+                        correctIndex: truth ? 1 : 2,
+                        correctValue: truth ? 'DOĞRU' : 'YANLIŞ',
+                        infoText: `${a?.n || '-'}: ${a?.c || 0} kez • ${b?.n || '-'}: ${b?.c || 0} kez`
+                    };
+                });
+            }
+        }
+
+        if (metric === 'auto' || metric === 'users') {
+            if (this.users.length >= 2) {
+                builders.push(() => {
+                    const pair = this.shuffle(this.users.slice(0, 35)).slice(0, 2);
+                    const a = pair[0], b = pair[1];
+                    const truth = (a?.mc || 0) > (b?.mc || 0);
+
+                    return {
+                        type: 'quiz',
+                        metric: 'users',
+                        title: `<span class="text-sky-400">${a?.n || '-'}</span>, <span class="text-pink-400">${b?.n || '-'}</span> kullanıcısından daha fazla mesaj attı.`,
+                        options: twoOptionAnswers,
+                        correctIndex: truth ? 1 : 2,
+                        correctValue: truth ? 'DOĞRU' : 'YANLIŞ',
+                        infoText: `${a?.n || '-'}: ${a?.mc || 0} mesaj • ${b?.n || '-'}: ${b?.mc || 0} mesaj`
+                    };
+                });
+            }
+        }
+
+        if (metric === 'auto' || metric === 'spam') {
+            if (this.spam.length >= 1) {
+                builders.push(() => {
+                    const s = randomPick(this.spam.slice(0, 25));
+                    const threshold = Math.max(3, Math.floor((s?.c || 0) * 0.75));
+                    const truth = (s?.c || 0) >= threshold;
+
+                    return {
+                        type: 'quiz',
+                        metric: 'spam',
+                        title: `"<span class="text-red-400">${(s?.m || '-').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</span>" mesajı en az <span class="text-yellow-400">${threshold}</span> kez tekrarlandı.`,
+                        options: twoOptionAnswers,
+                        correctIndex: truth ? 1 : 2,
+                        correctValue: truth ? 'DOĞRU' : 'YANLIŞ',
+                        infoText: `Gerçek tekrar sayısı: ${s?.c || 0}`
+                    };
+                });
+            }
+        }
+
+        if (metric === 'auto' || metric === 'moderation') {
+            if (timeoutUsers.length >= 1) {
+                builders.push(() => {
+                    const u = randomPick(timeoutUsers.slice(0, 20));
+                    const real = u?.mod_received?.timeouts || 0;
+                    const threshold = Math.max(1, real - Math.floor(Math.random() * 2));
+                    const truth = real >= threshold;
+
+                    return {
+                        type: 'quiz',
+                        metric: 'moderation',
+                        title: `<span class="text-yellow-400">${u?.n || '-'}</span> kullanıcısı en az <span class="text-yellow-400">${threshold}</span> timeout yedi.`,
+                        options: twoOptionAnswers,
+                        correctIndex: truth ? 1 : 2,
+                        correctValue: truth ? 'DOĞRU' : 'YANLIŞ',
+                        infoText: `${u?.n || '-'} toplam ${real} timeout yemiş.`
+                    };
+                });
+            }
+
+            if (banUsers.length >= 1) {
+                builders.push(() => {
+                    const u = randomPick(banUsers.slice(0, 20));
+                    const real = u?.mod_received?.bans || 0;
+                    const truth = real > 0;
+
+                    return {
+                        type: 'quiz',
+                        metric: 'moderation',
+                        title: `<span class="text-red-400">${u?.n || '-'}</span> kullanıcısı ban yedi.`,
+                        options: twoOptionAnswers,
+                        correctIndex: truth ? 1 : 2,
+                        correctValue: truth ? 'DOĞRU' : 'YANLIŞ',
+                        infoText: `${u?.n || '-'} toplam ${real} ban yemiş.`
+                    };
+                });
+            }
+
+            if (modsSafe.length >= 1) {
+                builders.push(() => {
+                    const mod = randomPick(modsSafe.slice(0, 20));
+                    const total = mod?.total_actions || 0;
+                    const threshold = Math.max(1, Math.floor(total * 0.5));
+                    const truth = total >= threshold;
+
+                    return {
+                        type: 'quiz',
+                        metric: 'moderation',
+                        title: `<span class="text-cyan-400">${mod?.n || '-'}</span> moderatörü en az <span class="text-cyan-400">${threshold}</span> işlem yaptı.`,
+                        options: twoOptionAnswers,
+                        correctIndex: truth ? 1 : 2,
+                        correctValue: truth ? 'DOĞRU' : 'YANLIŞ',
+                        infoText: `${mod?.n || '-'} toplam ${total} moderasyon işlemi yaptı.`
+                    };
+                });
+            }
+        }
+
+        if (!builders.length) {
+            return {
+                type: 'quiz',
+                metric: 'auto',
+                title: 'seçili filtre için yeterli doğru / yanlış verisi bulunamadı.',
+                options: twoOptionAnswers,
+                correctIndex: 1,
+                correctValue: 'DOĞRU',
+                infoText: 'Farklı bir veri aralığı veya soru havuzu deneyebilirsin.'
+            };
+        }
+
+        return randomPick(builders)();
+    }
+}).mount('#app');
+</script>
+</body>
+</html>

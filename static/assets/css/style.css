@@ -1,0 +1,60 @@
+body {
+    font-family: 'Inter', sans-serif;
+    background: #05070a;
+    color: #f1f5f9;
+    overflow: hidden;
+}
+
+.glass {
+    background: #0f1218;
+    border: 1px solid rgba(255,255,255,0.05);
+}
+
+.active-link {
+    background: #e91e63 !important;
+    color: white !important;
+}
+
+.scroll-flat::-webkit-scrollbar {
+    height: 4px;
+    width: 4px;
+}
+
+.scroll-flat::-webkit-scrollbar-thumb {
+    background: #e91e63;
+    border-radius: 10px;
+}
+
+.chat-emote {
+    height: 28px;
+    display: inline-block;
+    vertical-align: middle;
+}
+
+.page-section {
+    overflow-y: auto;
+    overflow-x: visible !important;
+}
+
+.stat-card {
+    background: #0f1218;
+    border: 1px solid rgba(255,255,255,0.05);
+    border-radius: 24px;
+    padding: 24px;
+}
+
+.table-row {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.05);
+    border-radius: 18px;
+}
+
+select{
+    background:#0b0f14;
+    color:white;
+}
+
+select option{
+    background:#0b0f14;
+    color:white;
+}

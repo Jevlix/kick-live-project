@@ -1,0 +1,722 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Emoji Sıralaması | RRaenee</title>
+
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/assets/css/style.css" />
+</head>
+<body class="bg-[#05070a] text-gray-100 font-['Inter']">
+<div id="app" class="flex h-screen overflow-hidden">
+    <div v-html="sidebar" class="flex"></div>
+
+    <main class="flex-1 flex flex-col overflow-hidden relative">
+        <header class="p-8 pb-4 flex flex-col gap-6">
+            <div class="flex justify-between items-end gap-6 flex-wrap">
+                <div>
+                    <h2 class="text-4xl font-black text-white uppercase tracking-tighter">Emoji Sıralaması</h2>
+                    <p class="text-gray-400 mt-1">
+                        Seçili veri aralığındaki en çok kullanılan Kick emojileri
+                    </p>
+
+                    <div class="flex flex-wrap gap-2 mt-4">
+                        <div class="px-3 py-1.5 rounded-xl border border-yellow-500/20 bg-yellow-500/10 text-yellow-300 text-xs font-bold uppercase tracking-wider">
+                            {{ currentLabel }}
+                        </div>
+
+                        <div
+                            class="px-3 py-1.5 rounded-xl border text-xs font-bold uppercase tracking-wider"
+                            :class="isLiveMode ? 'border-green-500/20 bg-green-500/10 text-green-300' : 'border-white/10 bg-white/5 text-gray-300'"
+                        >
+                            {{ isLiveMode ? 'Canlı Otomatik Yenileme Açık' : 'Statik Görünüm' }}
+                        </div>
+
+                        <div
+                            class="px-3 py-1.5 rounded-xl border text-xs font-bold uppercase tracking-wider"
+                            :class="socketConnected ? 'border-cyan-500/20 bg-cyan-500/10 text-cyan-300' : 'border-white/10 bg-white/5 text-gray-400'"
+                        >
+                            {{ socketConnected ? 'WS Bağlı' : 'WS Bekleniyor' }}
+                        </div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3 min-w-[320px]">
+                    <div class="bg-yellow-500/10 border border-yellow-500/20 px-5 py-4 rounded-2xl">
+                        <span class="text-yellow-500 font-bold block text-[11px] uppercase tracking-widest">Benzersiz Emoji</span>
+                        <span class="text-2xl font-black text-white">{{ filteredEmotes.length }}</span>
+                    </div>
+
+                    <div class="bg-white/5 border border-white/10 px-5 py-4 rounded-2xl">
+                        <span class="text-gray-400 font-bold block text-[11px] uppercase tracking-widest">Toplam Emoji Kullanımı</span>
+                        <span class="text-2xl font-black text-white">{{ totalEmojiUsage.toLocaleString('tr-TR') }}</span>
+                    </div>
+                </div>
+            </div>
+
+            <div
+                v-if="apiMeta.warning"
+                class="rounded-2xl border border-yellow-500/20 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-300 font-bold"
+            >
+                <i class="fa fa-triangle-exclamation mr-2"></i>
+                {{ apiMeta.warning }}
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
+                <div>
+                    <label class="block text-[10px] uppercase font-black opacity-50 mb-2">Veri Modu</label>
+                    <select v-model="currentFilter.mode" @change="handleModeChange" class="w-full bg-[#0b0f14] text-white border border-white/10 rounded-2xl px-4 py-3 text-sm font-black outline-none appearance-none">
+                        <option value="live">Canlı Yayın</option>
+                        <option value="offstream_live">Canlı Offstream</option>
+                        <option value="stream">Yayın Seç</option>
+                        <option value="day">Gün Seç</option>
+                        <option value="offstream_day">Offstream Gün</option>
+                        <option value="week">Son 7 Gün</option>
+                        <option value="month">Ay Seç</option>
+                        <option value="all">Tüm Zamanlar</option>
+                    </select>
+                </div>
+
+                <div v-if="currentFilter.mode === 'stream'">
+                    <label class="block text-[10px] uppercase font-black opacity-50 mb-2">Yayın</label>
+                    <select v-model="currentFilter.stream_id" @change="handleFilterChange" class="w-full bg-[#0b0f14] text-white border border-white/10 rounded-2xl px-4 py-3 text-sm font-black outline-none appearance-none">
+                        <option value="">Yayın seç</option>
+                        <option v-for="s in streamOptions" :key="String(s.id)" :value="String(s.id)">
+                            {{ formatStreamLabel(s) }}
+                        </option>
+                    </select>
+                </div>
+
+                <div v-if="currentFilter.mode === 'day' || currentFilter.mode === 'offstream_day'">
+                    <label class="block text-[10px] uppercase font-black opacity-50 mb-2">
+                        {{ currentFilter.mode === 'offstream_day' ? 'Offstream Gün' : 'Gün' }}
+                    </label>
+                    <input
+                        v-model="currentFilter.date"
+                        @change="handleFilterChange"
+                        type="date"
+                        class="w-full bg-[#0b0f14] text-white border border-white/10 rounded-2xl px-4 py-3 text-sm font-black outline-none"
+                    />
+                </div>
+
+                <div v-if="currentFilter.mode === 'month'">
+                    <label class="block text-[10px] uppercase font-black opacity-50 mb-2">Ay</label>
+                    <input
+                        v-model="currentFilter.month"
+                        @change="handleFilterChange"
+                        type="month"
+                        class="w-full bg-[#0b0f14] text-white border border-white/10 rounded-2xl px-4 py-3 text-sm font-black outline-none"
+                    />
+                </div>
+
+                <div class="xl:col-span-2">
+                    <label class="block text-[10px] uppercase font-black opacity-50 mb-2">Aktif Veri</label>
+                    <div class="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-sm font-black min-h-[50px] flex items-center">
+                        {{ currentLabel }}
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <section class="px-8 pb-4">
+            <div class="max-w-7xl mx-auto bg-[#0d1117] border border-white/5 rounded-2xl p-4">
+                <div class="grid grid-cols-1 xl:grid-cols-12 gap-3">
+                    <div class="xl:col-span-5">
+                        <label class="text-[11px] uppercase tracking-widest text-gray-500 font-black block mb-2">Emoji Ara</label>
+                        <div class="relative">
+                            <i class="fa fa-search absolute left-4 top-1/2 -translate-y-1/2 text-gray-500"></i>
+                            <input
+                                v-model.trim="search"
+                                type="text"
+                                placeholder="Emoji adı veya ID ara..."
+                                class="w-full bg-[#090c10] border border-white/10 rounded-2xl pl-11 pr-4 py-3 text-white outline-none focus:border-yellow-500/40"
+                            />
+                        </div>
+                    </div>
+
+                    <div class="xl:col-span-2">
+                        <label class="text-[11px] uppercase tracking-widest text-gray-500 font-black block mb-2">Min Kullanım</label>
+                        <input
+                            v-model.number="minCount"
+                            type="number"
+                            min="1"
+                            class="w-full bg-[#090c10] border border-white/10 rounded-2xl px-4 py-3 text-white outline-none focus:border-yellow-500/40"
+                        />
+                    </div>
+
+                    <div class="xl:col-span-2">
+                        <label class="text-[11px] uppercase tracking-widest text-gray-500 font-black block mb-2">Sıralama</label>
+                        <select
+                            v-model="sortBy"
+                            class="w-full bg-[#090c10] border border-white/10 rounded-2xl px-4 py-3 text-white outline-none focus:border-yellow-500/40"
+                        >
+                            <option value="count">Kullanım</option>
+                            <option value="unique">Farklı Kullanıcı</option>
+                            <option value="recent">Son Kullanım</option>
+                            <option value="name">İsim</option>
+                        </select>
+                    </div>
+
+                    <div class="xl:col-span-3">
+                        <label class="text-[11px] uppercase tracking-widest text-gray-500 font-black block mb-2">Filtreler</label>
+                        <div class="flex flex-wrap gap-2 h-[50px] items-center">
+                            <button
+                                @click="excludeSystem = !excludeSystem"
+                                class="px-3 py-2 rounded-xl border text-xs font-bold transition"
+                                :class="excludeSystem ? 'bg-pink-500/10 text-pink-300 border-pink-500/20' : 'bg-white/5 text-gray-400 border-white/10'"
+                            >
+                                System Hariç
+                            </button>
+
+                            <button
+                                @click="excludeBotrix = !excludeBotrix"
+                                class="px-3 py-2 rounded-xl border text-xs font-bold transition"
+                                :class="excludeBotrix ? 'bg-cyan-500/10 text-cyan-300 border-cyan-500/20' : 'bg-white/5 text-gray-400 border-white/10'"
+                            >
+                                BotRix Hariç
+                            </button>
+
+                            <button
+                                @click="fetchEmotes(true)"
+                                class="px-3 py-2 rounded-xl border border-yellow-500/20 bg-yellow-500/10 text-yellow-300 text-xs font-bold transition hover:bg-yellow-500/15"
+                            >
+                                Yenile
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex flex-wrap items-center justify-between gap-3 mt-4 pt-4 border-t border-white/5 text-xs">
+                    <div class="text-gray-500">
+                        Son veri çekme:
+                        <span class="text-gray-300 font-semibold">{{ lastUpdatedText }}</span>
+                    </div>
+
+                    <div class="text-gray-500">
+                        Gösterilen:
+                        <span class="text-white font-black">{{ filteredEmotes.length }}</span>
+                        /
+                        <span class="text-gray-300">{{ emotes.length }}</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="flex-1 overflow-y-auto p-8 pt-0 scroll-flat">
+            <div class="max-w-7xl mx-auto space-y-3">
+                <div v-if="loading" class="bg-[#0f1218] border border-white/5 rounded-2xl p-8 text-center text-gray-400">
+                    <i class="fa fa-spinner fa-spin mr-2"></i> Emoji verileri yükleniyor...
+                </div>
+
+                <div v-else-if="error" class="bg-red-500/10 border border-red-500/20 rounded-2xl p-6 text-red-300">
+                    <div class="font-black uppercase tracking-wider mb-1">Veri Hatası</div>
+                    <div class="text-sm">{{ error }}</div>
+                </div>
+
+                <template v-else>
+                    <div class="grid grid-cols-12 px-6 py-3 text-xs font-black uppercase tracking-widest text-gray-500 border-b border-white/5">
+                        <div class="col-span-1">Sıra</div>
+                        <div class="col-span-3">Emoji</div>
+                        <div class="col-span-2 text-right text-yellow-500">Kullanım</div>
+                        <div class="col-span-2 text-right">Farklı Kullanıcı</div>
+                        <div class="col-span-2 text-right">Son Kullanım</div>
+                        <div class="col-span-2 text-right px-3">Top Kullananlar</div>
+                    </div>
+
+                    <div
+                        v-for="(emoji, index) in filteredEmotes"
+                        :key="emoji.key"
+                        class="grid grid-cols-12 items-center bg-[#0f1218] border border-white/5 hover:border-yellow-500/30 transition-all p-4 rounded-2xl group"
+                    >
+                        <div class="col-span-1 text-2xl font-black text-gray-700 group-hover:text-yellow-500 transition">
+                            #{{ index + 1 }}
+                        </div>
+
+                        <div class="col-span-3 flex items-center gap-4 min-w-0">
+                            <div class="w-14 h-14 bg-black/40 rounded-xl flex items-center justify-center p-2 border border-white/5 shadow-inner shrink-0">
+                                <img
+                                    :src="'https://files.kick.com/emotes/' + emoji.id + '/fullsize'"
+                                    :alt="emoji.raw || emoji.n"
+                                    class="max-w-full max-h-full object-contain shadow-lg"
+                                    loading="lazy"
+                                />
+                            </div>
+
+                            <div class="min-w-0">
+                                <div class="font-bold text-lg text-white group-hover:text-yellow-400 transition truncate">
+                                    {{ emoji.n }}
+                                </div>
+                                <div class="text-[10px] text-gray-500 font-mono tracking-tighter opacity-70 uppercase">
+                                    ID: {{ emoji.id }}
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="col-span-2 text-right">
+                            <div class="text-2xl font-black text-white tracking-tighter">
+                                {{ emoji.c.toLocaleString('tr-TR') }}
+                            </div>
+                            <div class="text-[10px] text-yellow-600 font-black uppercase">Toplam</div>
+                        </div>
+
+                        <div class="col-span-2 text-right">
+                            <div class="text-xl font-black text-white">
+                                {{ emoji.uniqueUsers }}
+                            </div>
+                            <div class="text-[10px] text-gray-500 font-black uppercase">Kullanıcı</div>
+                        </div>
+
+                        <div class="col-span-2 text-right">
+                            <div class="text-sm font-bold text-white">
+                                {{ formatEventTime(emoji.lastUsed) }}
+                            </div>
+                            <div class="text-[10px] text-gray-500 font-black uppercase truncate">
+                                {{ formatEventDate(emoji.lastUsed) }}
+                            </div>
+                        </div>
+
+                        <div class="col-span-2 flex justify-end gap-2 px-3 overflow-hidden">
+                            <div
+                                v-for="(topUser, uIndex) in emoji.top.slice(0, 3)"
+                                :key="uIndex"
+                                class="bg-white/5 border border-white/5 px-3 py-1.5 rounded-xl text-xs flex flex-col items-center min-w-[82px] max-w-[110px]"
+                            >
+                                <span class="text-gray-300 font-bold truncate max-w-[90px]">{{ topUser.u }}</span>
+                                <span class="text-yellow-500 font-black text-[10px]">{{ topUser.c }} kez</span>
+                            </div>
+
+                            <div
+                                v-if="!emoji.top.length"
+                                class="bg-white/5 border border-white/5 px-3 py-2 rounded-xl text-[11px] text-gray-500"
+                            >
+                                veri yok
+                            </div>
+                        </div>
+                    </div>
+
+                    <div
+                        v-if="!filteredEmotes.length"
+                        class="bg-[#0f1218] border border-white/5 rounded-2xl p-8 text-center text-gray-400"
+                    >
+                        Filtreye uygun emoji bulunamadı.
+                    </div>
+                </template>
+            </div>
+        </section>
+    </main>
+</div>
+
+<script src="/assets/js/common.js"></script>
+<script>
+const { createApp } = Vue;
+
+createApp({
+    data() {
+        return {
+            sidebar: sidebarHtml('emojis'),
+
+            loading: true,
+            error: '',
+            emotes: [],
+
+            search: '',
+            minCount: 1,
+            sortBy: 'count',
+            excludeSystem: true,
+            excludeBotrix: true,
+
+            currentFilter: getFilterState(),
+            apiMeta: {},
+            streamOptions: [],
+            lastUpdatedAt: null,
+
+            refreshTimer: null,
+            refreshDebounce: null,
+            socketRef: null,
+            socketConnected: false
+        };
+    },
+
+    computed: {
+        currentLabel() {
+            const selectedStream =
+                this.currentFilter?.mode === 'stream'
+                    ? this.streamOptions.find(s => String(s.id) === String(this.currentFilter.stream_id))
+                    : null;
+
+            return getReadableFilterLabel(this.currentFilter, this.apiMeta, selectedStream);
+        },
+
+        isLiveMode() {
+            const mode = this.currentFilter?.mode || 'live';
+            return mode === 'live' || mode === 'offstream_live';
+        },
+
+        filteredEmotes() {
+            const q = String(this.search || '').toLowerCase().trim();
+
+            let list = this.emotes.filter(item => {
+                if ((item.c || 0) < (this.minCount || 1)) return false;
+
+                if (!q) return true;
+
+                return (
+                    String(item.n || '').toLowerCase().includes(q) ||
+                    String(item.id || '').toLowerCase().includes(q) ||
+                    String(item.raw || '').toLowerCase().includes(q)
+                );
+            });
+
+            if (this.sortBy === 'count') {
+                list.sort((a, b) => b.c - a.c);
+            } else if (this.sortBy === 'unique') {
+                list.sort((a, b) => b.uniqueUsers - a.uniqueUsers || b.c - a.c);
+            } else if (this.sortBy === 'recent') {
+                list.sort((a, b) => new Date(b.lastUsed || 0) - new Date(a.lastUsed || 0));
+            } else if (this.sortBy === 'name') {
+                list.sort((a, b) => String(a.n || '').localeCompare(String(b.n || ''), 'tr'));
+            }
+
+            return list;
+        },
+
+        totalEmojiUsage() {
+            return this.filteredEmotes.reduce((sum, item) => sum + (item.c || 0), 0);
+        },
+
+        lastUpdatedText() {
+            if (!this.lastUpdatedAt) return '-';
+
+            try {
+                return new Date(this.lastUpdatedAt).toLocaleString('tr-TR');
+            } catch (e) {
+                return this.lastUpdatedAt;
+            }
+        }
+    },
+
+    methods: {
+        isKickEmoteWord(word) {
+            return /emote\d+[a-zA-Z]*/i.test(String(word || '').trim());
+        },
+
+        getKickEmoteId(word) {
+            const match = String(word || '').trim().match(/emote(\d+)/i);
+            return match ? match[1] : null;
+        },
+
+        getRemainingTextAfterEmote(word) {
+            return String(word || '')
+                .replace(/emote\d+[a-zA-Z]*/ig, '')
+                .trim();
+        },
+
+        formatEventTime(value) {
+            if (!value) return '-';
+
+            try {
+                return new Date(value).toLocaleTimeString('tr-TR', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit'
+                });
+            } catch (e) {
+                return '-';
+            }
+        },
+
+        formatEventDate(value) {
+            if (!value) return '-';
+
+            try {
+                return new Date(value).toLocaleDateString('tr-TR');
+            } catch (e) {
+                return '-';
+            }
+        },
+
+        formatStreamLabel(stream) {
+            if (!stream) return 'Yayın seç';
+
+            if (stream.display_label) return stream.display_label;
+
+            if (stream.label_date) {
+                const suffix = stream.session_type === 'offstream' ? 'offstream' : 'yayını';
+                return `${formatHumanDate(stream.label_date)} ${suffix}`;
+            }
+
+            const date = stream.started_at
+                ? new Date(stream.started_at).toLocaleDateString('tr-TR')
+                : '-';
+
+            const started = stream.started_at
+                ? new Date(stream.started_at).toLocaleTimeString('tr-TR', {
+                    hour: '2-digit',
+                    minute: '2-digit'
+                })
+                : '--:--';
+
+            return `${date} · ${started}`;
+        },
+
+        syncFilterState() {
+            this.currentFilter = setFilterState(this.currentFilter);
+        },
+
+        isFilteredUser(username) {
+            const u = String(username || '').toLowerCase().trim();
+
+            if (!u) return false;
+            if (this.excludeSystem && (u === 'system' || u === 'kick system' || u === 'bot')) return true;
+            if (this.excludeBotrix && u.includes('botrix')) return true;
+
+            return false;
+        },
+
+        addEmoteHit(map, rawToken, username, timestamp) {
+            const id = this.getKickEmoteId(rawToken);
+            if (!id) return;
+
+            const cleanName = this.getRemainingTextAfterEmote(rawToken) || `emote${id}`;
+            const key = String(id);
+
+            if (!map[key]) {
+                map[key] = {
+                    key,
+                    id,
+                    raw: rawToken,
+                    n: cleanName,
+                    c: 0,
+                    uniqueUserSet: new Set(),
+                    userMap: {},
+                    lastUsed: timestamp || null,
+                    top: []
+                };
+            }
+
+            const row = map[key];
+            row.c += 1;
+            row.uniqueUserSet.add(username);
+            row.userMap[username] = (row.userMap[username] || 0) + 1;
+
+            if (!row.lastUsed || new Date(timestamp) > new Date(row.lastUsed)) {
+                row.lastUsed = timestamp;
+            }
+        },
+
+        buildRichEmotes(events) {
+            const map = {};
+            const bracketRegex = /\[emote:(\d+):([^\]]+)\]/gi;
+
+            for (const ev of (events || [])) {
+                if (ev.event_type !== 'chat') continue;
+
+                const username = ev.username || '';
+                if (this.isFilteredUser(username)) continue;
+
+                const msg = String(ev.message || '');
+                const timestamp = ev.timestamp || '';
+
+                const bracketMatches = [...msg.matchAll(bracketRegex)];
+                for (const match of bracketMatches) {
+                    const id = match[1];
+                    const rawName = match[2] || `emote${id}`;
+                    this.addEmoteHit(map, `emote${id}${rawName}`, username, timestamp);
+                }
+
+                const tokens = msg.split(/\s+/).filter(Boolean);
+                for (const token of tokens) {
+                    if (!this.isKickEmoteWord(token)) continue;
+                    this.addEmoteHit(map, token, username, timestamp);
+                }
+            }
+
+            return Object.values(map).map(item => {
+                item.uniqueUsers = item.uniqueUserSet.size;
+                item.top = Object.entries(item.userMap)
+                    .map(([u, c]) => ({ u, c }))
+                    .sort((a, b) => b.c - a.c)
+                    .slice(0, 3);
+
+                delete item.uniqueUserSet;
+                delete item.userMap;
+                return item;
+            });
+        },
+
+        async fetchStreamsForSelect() {
+            try {
+                this.streamOptions = await fetchStreams(100);
+
+                if (this.currentFilter.mode === 'stream' && !this.currentFilter.stream_id && this.streamOptions.length > 0) {
+                    this.currentFilter.stream_id = String(this.streamOptions[0].id);
+                    this.syncFilterState();
+                }
+            } catch (err) {
+                console.error('stream listesi alınamadı', err);
+            }
+        },
+
+        async fetchEmotes(showLoader = false) {
+            if (showLoader) this.loading = true;
+            this.error = '';
+
+            try {
+                if (typeof loadDashboardData !== 'function') {
+                    throw new Error('common.js içinde loadDashboardData bulunamadı.');
+                }
+
+                this.syncFilterState();
+
+                const result = await loadDashboardData(this.currentFilter);
+                this.currentFilter = result.filter || this.currentFilter || getFilterState();
+                this.apiMeta = result.apiData?.meta || {};
+                this.emotes = this.buildRichEmotes(result.transformed?.rawEvents || []);
+                this.lastUpdatedAt = new Date().toISOString();
+            } catch (err) {
+                console.error('Emoji verisi yüklenemedi:', err);
+                this.error = err?.message || 'Emoji verileri alınamadı.';
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        async handleModeChange() {
+            if (this.currentFilter.mode === 'stream') {
+                if (!this.currentFilter.stream_id && this.streamOptions.length > 0) {
+                    this.currentFilter.stream_id = String(this.streamOptions[0].id);
+                }
+            }
+
+            if (this.currentFilter.mode !== 'stream') {
+                this.currentFilter.stream_id = this.currentFilter.stream_id || '';
+            }
+
+            await this.handleFilterChange();
+        },
+
+        async handleFilterChange() {
+            if (this.currentFilter.mode === 'stream' && !this.currentFilter.stream_id && this.streamOptions.length > 0) {
+                this.currentFilter.stream_id = String(this.streamOptions[0].id);
+            }
+
+            this.syncFilterState();
+            await this.fetchEmotes(true);
+            this.startAutoRefresh();
+        },
+
+        startAutoRefresh() {
+            this.stopAutoRefresh();
+
+            if (!this.isLiveMode) return;
+
+            this.refreshTimer = setInterval(() => {
+                this.fetchEmotes(false);
+            }, 10000);
+        },
+
+        stopAutoRefresh() {
+            if (this.refreshTimer) {
+                clearInterval(this.refreshTimer);
+                this.refreshTimer = null;
+            }
+        },
+
+        scheduleRefreshFromSocket() {
+            if (!this.isLiveMode) return;
+
+            if (this.refreshDebounce) {
+                clearTimeout(this.refreshDebounce);
+            }
+
+            this.refreshDebounce = setTimeout(() => {
+                this.fetchEmotes(false);
+            }, 1200);
+        },
+
+        initWebSocket() {
+            try {
+                const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+                this.socketRef = new WebSocket(`${protocol}//${location.host}/ws`);
+
+                this.socketRef.onopen = () => {
+                    this.socketConnected = true;
+                };
+
+                this.socketRef.onclose = () => {
+                    this.socketConnected = false;
+
+                    setTimeout(() => {
+                        this.initWebSocket();
+                    }, 5000);
+                };
+
+                this.socketRef.onerror = () => {
+                    this.socketConnected = false;
+                };
+
+                this.socketRef.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+
+                        if (!this.isLiveMode) return;
+
+                        if (data.type === 'chat' || data.type === 'system' || data.type === 'other' || data.type === 'bootstrap') {
+                            this.scheduleRefreshFromSocket();
+                        }
+                    } catch (e) {
+                        console.error('WS parse hatası:', e);
+                    }
+                };
+            } catch (e) {
+                console.error('WS başlatılamadı:', e);
+                this.socketConnected = false;
+            }
+        }
+    },
+
+    async mounted() {
+        await this.fetchStreamsForSelect();
+        await this.fetchEmotes(true);
+        this.startAutoRefresh();
+        this.initWebSocket();
+
+        window.addEventListener('storage', async (event) => {
+            if (event.key === 'rr_shared_filter_state_v1') {
+                this.currentFilter = getFilterState();
+                await this.fetchStreamsForSelect();
+                await this.fetchEmotes(true);
+                this.startAutoRefresh();
+            }
+        });
+    },
+
+    beforeUnmount() {
+        this.stopAutoRefresh();
+
+        if (this.refreshDebounce) {
+            clearTimeout(this.refreshDebounce);
+            this.refreshDebounce = null;
+        }
+
+        if (this.socketRef) {
+            try {
+                this.socketRef.close();
+            } catch (e) {}
+        }
+    }
+}).mount('#app');
+</script>
+
+<style>
+.scroll-flat::-webkit-scrollbar { width: 5px; }
+.scroll-flat::-webkit-scrollbar-track { background: transparent; }
+.scroll-flat::-webkit-scrollbar-thumb { background: #ca8a04; border-radius: 10px; }
+</style>
+</body>
+</html>

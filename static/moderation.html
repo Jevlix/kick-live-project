@@ -1,0 +1,948 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RRaenee Moderation</title>
+
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/assets/css/style.css">
+</head>
+<body class="bg-[#05070a] text-gray-100 font-['Inter']">
+    <div id="app" class="flex h-screen overflow-hidden">
+        <div v-html="sidebar" class="flex"></div>
+
+        <main class="flex-1 flex flex-col overflow-hidden relative">
+            <header class="p-8 pb-4 flex flex-col gap-6">
+                <div class="flex justify-between items-end gap-6 flex-wrap">
+                    <div>
+                        <h2 class="text-4xl font-black text-cyan-400 uppercase tracking-tighter">Moderation Paneli</h2>
+                        <p class="text-gray-400 mt-1">
+                            Timeout, ban, unban ve mesaj silme işlemlerinin canlı görünümü
+                        </p>
+
+                        <div class="flex flex-wrap gap-2 mt-4">
+                            <div class="px-3 py-1.5 rounded-xl border border-cyan-500/20 bg-cyan-500/10 text-cyan-300 text-xs font-bold uppercase tracking-wider">
+                                {{ currentLabel }}
+                            </div>
+
+                            <div
+                                class="px-3 py-1.5 rounded-xl border text-xs font-bold uppercase tracking-wider"
+                                :class="isLiveMode ? 'border-green-500/20 bg-green-500/10 text-green-300' : 'border-white/10 bg-white/5 text-gray-300'"
+                            >
+                                {{ isLiveMode ? 'Canlı Otomatik Yenileme Açık' : 'Statik Görünüm' }}
+                            </div>
+
+                            <div
+                                class="px-3 py-1.5 rounded-xl border text-xs font-bold uppercase tracking-wider"
+                                :class="socketConnected ? 'border-cyan-500/20 bg-cyan-500/10 text-cyan-300' : 'border-white/10 bg-white/5 text-gray-400'"
+                            >
+                                {{ socketConnected ? 'WS Bağlı' : 'WS Bekleniyor' }}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-3 min-w-[340px]">
+                        <div class="bg-cyan-500/10 border border-cyan-500/20 px-5 py-4 rounded-2xl">
+                            <span class="text-cyan-400 font-bold block text-[11px] uppercase tracking-widest">Mod Sayısı</span>
+                            <span class="text-2xl font-black text-white">{{ filteredMods.length }}</span>
+                        </div>
+
+                        <div class="bg-white/5 border border-white/10 px-5 py-4 rounded-2xl">
+                            <span class="text-gray-400 font-bold block text-[11px] uppercase tracking-widest">Toplam İşlem</span>
+                            <span class="text-2xl font-black text-white">{{ summary.total_actions || 0 }}</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div
+                    v-if="apiMeta.warning"
+                    class="rounded-2xl border border-yellow-500/20 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-300 font-bold"
+                >
+                    <i class="fa fa-triangle-exclamation mr-2"></i>
+                    {{ apiMeta.warning }}
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
+                    <div>
+                        <label class="block text-[10px] uppercase font-black opacity-50 mb-2">Veri Modu</label>
+                        <select v-model="currentFilter.mode" @change="handleModeChange" class="w-full bg-[#0b0f14] text-white border border-white/10 rounded-2xl px-4 py-3 text-sm font-black outline-none appearance-none">
+                            <option value="live">Canlı Yayın</option>
+                            <option value="offstream_live">Canlı Offstream</option>
+                            <option value="stream">Yayın Seç</option>
+                            <option value="day">Gün Seç</option>
+                            <option value="offstream_day">Offstream Gün</option>
+                            <option value="week">Son 7 Gün</option>
+                            <option value="month">Ay Seç</option>
+                            <option value="all">Tüm Zamanlar</option>
+                        </select>
+                    </div>
+
+                    <div v-if="currentFilter.mode === 'stream'">
+                        <label class="block text-[10px] uppercase font-black opacity-50 mb-2">Yayın</label>
+                        <select v-model="currentFilter.stream_id" @change="handleFilterChange" class="w-full bg-[#0b0f14] text-white border border-white/10 rounded-2xl px-4 py-3 text-sm font-black outline-none appearance-none">
+                            <option value="">Yayın seç</option>
+                            <option v-for="s in streamOptions" :key="String(s.id)" :value="String(s.id)">
+                                {{ formatStreamLabel(s) }}
+                            </option>
+                        </select>
+                    </div>
+
+                    <div v-if="currentFilter.mode === 'day' || currentFilter.mode === 'offstream_day'">
+                        <label class="block text-[10px] uppercase font-black opacity-50 mb-2">
+                            {{ currentFilter.mode === 'offstream_day' ? 'Offstream Gün' : 'Gün' }}
+                        </label>
+                        <input
+                            v-model="currentFilter.date"
+                            @change="handleFilterChange"
+                            type="date"
+                            class="w-full bg-[#0b0f14] text-white border border-white/10 rounded-2xl px-4 py-3 text-sm font-black outline-none"
+                        >
+                    </div>
+
+                    <div v-if="currentFilter.mode === 'month'">
+                        <label class="block text-[10px] uppercase font-black opacity-50 mb-2">Ay</label>
+                        <input
+                            v-model="currentFilter.month"
+                            @change="handleFilterChange"
+                            type="month"
+                            class="w-full bg-[#0b0f14] text-white border border-white/10 rounded-2xl px-4 py-3 text-sm font-black outline-none"
+                        >
+                    </div>
+
+                    <div class="xl:col-span-2">
+                        <label class="block text-[10px] uppercase font-black opacity-50 mb-2">Aktif Veri</label>
+                        <div class="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-sm font-black min-h-[50px] flex items-center">
+                            {{ currentLabel }}
+                        </div>
+                    </div>
+                </div>
+            </header>
+
+            <section class="px-8 pb-4">
+                <div class="max-w-7xl mx-auto bg-[#0d1117] border border-white/5 rounded-2xl p-4">
+                    <div class="grid grid-cols-1 xl:grid-cols-12 gap-3">
+                        <div class="xl:col-span-4">
+                            <label class="text-[11px] uppercase tracking-widest text-gray-500 font-black block mb-2">Moderatör Ara</label>
+                            <div class="relative">
+                                <i class="fa fa-search absolute left-4 top-1/2 -translate-y-1/2 text-gray-500"></i>
+                                <input
+                                    v-model.trim="search"
+                                    type="text"
+                                    placeholder="Mod adı ara..."
+                                    class="w-full bg-[#090c10] border border-white/10 rounded-2xl pl-11 pr-4 py-3 text-white outline-none focus:border-cyan-500/40"
+                                >
+                            </div>
+                        </div>
+
+                        <div class="xl:col-span-2">
+                            <label class="text-[11px] uppercase tracking-widest text-gray-500 font-black block mb-2">Aksiyon Türü</label>
+                            <select
+                                v-model="actionFilter"
+                                class="w-full bg-[#090c10] border border-white/10 rounded-2xl px-4 py-3 text-white outline-none focus:border-cyan-500/40"
+                            >
+                                <option value="all">Tümü</option>
+                                <option value="timeout">Timeout</option>
+                                <option value="ban">Ban</option>
+                                <option value="unban">Unban</option>
+                                <option value="delete">Delete</option>
+                                <option value="deleted_message">Deleted Message</option>
+                            </select>
+                        </div>
+
+                        <div class="xl:col-span-2">
+                            <label class="text-[11px] uppercase tracking-widest text-gray-500 font-black block mb-2">Sıralama</label>
+                            <select
+                                v-model="sortBy"
+                                class="w-full bg-[#090c10] border border-white/10 rounded-2xl px-4 py-3 text-white outline-none focus:border-cyan-500/40"
+                            >
+                                <option value="total">Toplam İşlem</option>
+                                <option value="timeouts">Timeout</option>
+                                <option value="bans">Ban</option>
+                                <option value="unbans">Unban</option>
+                                <option value="deletes">Silme</option>
+                                <option value="recent">Son İşlem</option>
+                                <option value="name">İsim</option>
+                            </select>
+                        </div>
+
+                        <div class="xl:col-span-4">
+                            <label class="text-[11px] uppercase tracking-widest text-gray-500 font-black block mb-2">Filtreler</label>
+                            <div class="flex flex-wrap gap-2 h-[50px] items-center">
+                                <button
+                                    @click="excludeSystem = !excludeSystem"
+                                    class="px-3 py-2 rounded-xl border text-xs font-bold transition"
+                                    :class="excludeSystem ? 'bg-pink-500/10 text-pink-300 border-pink-500/20' : 'bg-white/5 text-gray-400 border-white/10'"
+                                >
+                                    System Hariç
+                                </button>
+
+                                <button
+                                    @click="excludeBotrix = !excludeBotrix"
+                                    class="px-3 py-2 rounded-xl border text-xs font-bold transition"
+                                    :class="excludeBotrix ? 'bg-cyan-500/10 text-cyan-300 border-cyan-500/20' : 'bg-white/5 text-gray-400 border-white/10'"
+                                >
+                                    BotRix Hariç
+                                </button>
+
+                                <button
+                                    @click="fetchModeration(true)"
+                                    class="px-3 py-2 rounded-xl border border-cyan-500/20 bg-cyan-500/10 text-cyan-300 text-xs font-bold transition hover:bg-cyan-500/15"
+                                >
+                                    Yenile
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="flex flex-wrap items-center justify-between gap-3 mt-4 pt-4 border-t border-white/5 text-xs">
+                        <div class="text-gray-500">
+                            Son veri çekme:
+                            <span class="text-gray-300 font-semibold">{{ lastUpdatedText }}</span>
+                        </div>
+
+                        <div class="text-gray-500">
+                            Recent actions:
+                            <span class="text-white font-black">{{ filteredRecentActions.length }}</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="px-8 pb-4">
+                <div class="max-w-7xl mx-auto grid grid-cols-2 xl:grid-cols-5 gap-4">
+                    <div class="stat-card">
+                        <p class="opacity-50 text-xs font-bold mb-1 uppercase tracking-widest">Toplam İşlem</p>
+                        <h3 class="text-3xl font-black text-cyan-400">{{ summary.total_actions || 0 }}</h3>
+                    </div>
+                    <div class="stat-card">
+                        <p class="opacity-50 text-xs font-bold mb-1 uppercase tracking-widest">Timeout</p>
+                        <h3 class="text-3xl font-black text-yellow-400">{{ summary.timeouts || 0 }}</h3>
+                    </div>
+                    <div class="stat-card">
+                        <p class="opacity-50 text-xs font-bold mb-1 uppercase tracking-widest">Ban</p>
+                        <h3 class="text-3xl font-black text-red-400">{{ summary.bans || 0 }}</h3>
+                    </div>
+                    <div class="stat-card">
+                        <p class="opacity-50 text-xs font-bold mb-1 uppercase tracking-widest">Unban</p>
+                        <h3 class="text-3xl font-black text-green-400">{{ summary.unbans || 0 }}</h3>
+                    </div>
+                    <div class="stat-card">
+                        <p class="opacity-50 text-xs font-bold mb-1 uppercase tracking-widest">Mesaj Silme</p>
+                        <h3 class="text-3xl font-black text-pink-400">{{ summary.deleted_messages || 0 }}</h3>
+                    </div>
+                </div>
+            </section>
+
+            <section class="page-section flex-1 p-8 pt-0 scroll-flat overflow-y-auto">
+                <div class="max-w-7xl mx-auto grid grid-cols-1 xl:grid-cols-2 gap-6">
+                    <div class="stat-card">
+                        <h4 class="font-black text-xl italic flex items-center gap-2 mb-6">
+                            <div class="w-1 h-6 bg-cyan-400"></div>
+                            MOD LİSTESİ
+                        </h4>
+
+                        <div v-if="loading" class="opacity-60 text-sm">
+                            <i class="fa fa-spinner fa-spin mr-2"></i> Moderation verileri yükleniyor...
+                        </div>
+
+                        <div v-else-if="error" class="bg-red-500/10 border border-red-500/20 rounded-2xl p-6 text-red-300">
+                            <div class="font-black uppercase tracking-wider mb-1">Veri Hatası</div>
+                            <div class="text-sm">{{ error }}</div>
+                        </div>
+
+                        <div v-else class="space-y-4">
+                            <div
+                                v-for="mod in filteredMods"
+                                :key="mod.n"
+                                @click="selectedMod = mod"
+                                class="glass p-5 rounded-[24px] cursor-pointer hover:border-cyan-400 transition border border-white/5"
+                            >
+                                <div class="flex justify-between items-start gap-4 mb-4">
+                                    <div class="min-w-0 flex-1">
+                                        <h5 class="font-black text-2xl italic break-all">{{ mod.n }}</h5>
+                                        <div class="text-[10px] uppercase tracking-widest text-gray-500 mt-1">
+                                            Son İşlem: {{ formatEventDateTime(mod.last_action_at) }}
+                                        </div>
+                                    </div>
+                                    <span class="text-cyan-400 font-black text-xl">{{ mod.total_actions || 0 }}</span>
+                                </div>
+
+                                <div class="grid grid-cols-4 gap-2 text-center text-[10px] font-black uppercase tracking-tighter">
+                                    <div class="bg-white/5 p-3 rounded-2xl border border-white/5">
+                                        <p class="text-yellow-400 text-lg">{{ mod.timeouts || 0 }}</p>Timeout
+                                    </div>
+                                    <div class="bg-white/5 p-3 rounded-2xl border border-white/5">
+                                        <p class="text-red-400 text-lg">{{ mod.bans || 0 }}</p>Ban
+                                    </div>
+                                    <div class="bg-white/5 p-3 rounded-2xl border border-white/5">
+                                        <p class="text-green-400 text-lg">{{ mod.unbans || 0 }}</p>Unban
+                                    </div>
+                                    <div class="bg-white/5 p-3 rounded-2xl border border-white/5">
+                                        <p class="text-pink-400 text-lg">{{ mod.deleted_messages || 0 }}</p>Silme
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div v-if="!filteredMods.length && !loading && !error" class="opacity-40 text-sm">
+                                Moderatör bulunamadı.
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="stat-card">
+                        <h4 class="font-black text-xl italic flex items-center gap-2 mb-6">
+                            <div class="w-1 h-6 bg-cyan-400"></div>
+                            SON MODERASYON İŞLEMLERİ
+                        </h4>
+
+                        <div class="space-y-3 max-h-[800px] overflow-y-auto scroll-flat pr-2">
+                            <div
+                                v-for="(action, idx) in filteredRecentActions"
+                                :key="action.key || idx"
+                                class="p-4 rounded-[20px] bg-white/5 border border-white/5"
+                            >
+                                <div class="flex justify-between items-center gap-3 mb-2">
+                                    <span class="font-black" :class="getActionColor(action.action)">
+                                        {{ (action.action || '-').toUpperCase() }}
+                                    </span>
+                                    <span class="opacity-30 text-[10px] font-mono">{{ formatEventDateTime(action.t) }}</span>
+                                </div>
+
+                                <p class="text-sm">
+                                    <span class="text-cyan-400 font-black">{{ action.mod || 'Unknown Mod' }}</span>
+                                    →
+                                    <span class="font-black">{{ action.target || 'Bilinmiyor' }}</span>
+                                </p>
+
+                                <p v-if="action.reason" class="text-xs opacity-60 mt-2">Sebep: {{ action.reason }}</p>
+                                <p v-if="action.duration" class="text-xs opacity-60 mt-1">Süre: {{ action.duration }}</p>
+                                <div v-if="action.msg" class="text-xs opacity-70 mt-2 break-words" v-html="renderMessage(action.msg)"></div>
+                            </div>
+
+                            <div v-if="!filteredRecentActions.length" class="opacity-40 text-sm">
+                                Moderasyon verisi bulunamadı.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <transition name="modal">
+            <div v-if="selectedMod" class="fixed inset-0 flex justify-end z-[1000]">
+                <div @click="selectedMod = null" class="absolute inset-0 bg-black/80 backdrop-blur-md"></div>
+
+                <div class="w-full max-w-5xl glass h-full shadow-2xl flex flex-col z-10 border-l border-white/10 text-white">
+                    <div class="p-10 border-b border-white/5">
+                        <div class="flex justify-between items-start gap-4">
+                            <div class="flex-1 min-w-0">
+                                <span class="text-cyan-400 font-black text-xs uppercase italic">Mod Detayı</span>
+                                <h2 class="text-4xl md:text-6xl font-black mt-2 italic uppercase tracking-tighter break-all">{{ selectedMod.n }}</h2>
+                            </div>
+
+                            <button @click="selectedMod = null" class="text-5xl hover:text-red-500 transition leading-none ml-4">&times;</button>
+                        </div>
+
+                        <div class="grid grid-cols-4 gap-4 mt-8 text-center text-[10px] font-black uppercase tracking-tighter">
+                            <div class="bg-white/5 p-4 rounded-3xl border border-white/5">
+                                <p class="text-yellow-400 text-2xl">{{ selectedMod.timeouts || 0 }}</p>Timeout
+                            </div>
+                            <div class="bg-white/5 p-4 rounded-3xl border border-white/5">
+                                <p class="text-red-400 text-2xl">{{ selectedMod.bans || 0 }}</p>Ban
+                            </div>
+                            <div class="bg-white/5 p-4 rounded-3xl border border-white/5">
+                                <p class="text-green-400 text-2xl">{{ selectedMod.unbans || 0 }}</p>Unban
+                            </div>
+                            <div class="bg-white/5 p-4 rounded-3xl border border-white/5">
+                                <p class="text-pink-400 text-2xl">{{ selectedMod.deleted_messages || 0 }}</p>Silme
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-8">
+                            <div class="bg-white/5 p-4 rounded-3xl border border-white/5">
+                                <p class="text-[10px] font-black text-cyan-400 uppercase mb-3">En Çok İşlem Yapılan Kullanıcılar</p>
+                                <div
+                                    v-for="(u, i) in (selectedMod.top_targets || [])"
+                                    :key="i"
+                                    class="flex justify-between text-xs py-1.5 opacity-80 border-b border-white/5 last:border-0"
+                                >
+                                    <span class="break-all">{{ getEntryName(u) }}</span>
+                                    <b>{{ getEntryCount(u) }}</b>
+                                </div>
+                                <div v-if="!(selectedMod.top_targets || []).length" class="text-xs opacity-40">Veri yok</div>
+                            </div>
+
+                            <div class="bg-white/5 p-4 rounded-3xl border border-white/5">
+                                <p class="text-[10px] font-black text-pink-400 uppercase mb-3">En Sık Sebepler</p>
+                                <div
+                                    v-for="(r, i) in (selectedMod.top_reasons || [])"
+                                    :key="i"
+                                    class="flex justify-between text-xs py-1.5 opacity-80 border-b border-white/5 last:border-0"
+                                >
+                                    <span class="break-all">{{ r.r || getEntryName(r) }}</span>
+                                    <b>{{ r.c || getEntryCount(r) }}</b>
+                                </div>
+                                <div v-if="!(selectedMod.top_reasons || []).length" class="text-xs opacity-40">Veri yok</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="flex-1 overflow-y-auto p-10 bg-black/30 space-y-4 scroll-flat">
+                        <p class="text-[10px] font-black opacity-30 uppercase italic">Mod İşlem Geçmişi</p>
+
+                        <div
+                            v-for="(log, i) in (selectedMod.logs || [])"
+                            :key="i"
+                            class="p-6 rounded-[24px] bg-white/5 border-l-4 border-cyan-400 text-sm"
+                        >
+                            <div class="flex justify-between items-center gap-3 mb-3">
+                                <span class="font-black text-base" :class="getActionColor(log.action)">
+                                    {{ (log.action || '-').toUpperCase() }}
+                                </span>
+                                <span class="opacity-30 text-[11px] font-mono">{{ formatEventDateTime(log.t) }}</span>
+                            </div>
+
+                            <p class="text-base">
+                                Hedef:
+                                <span class="font-black">{{ log.target || 'Bilinmiyor' }}</span>
+                            </p>
+
+                            <p v-if="log.reason" class="text-sm opacity-70 mt-3">Sebep: {{ log.reason }}</p>
+                            <p v-if="log.duration" class="text-sm opacity-70 mt-2">Süre: {{ log.duration }}</p>
+                            <div v-if="log.msg" class="text-sm opacity-80 mt-3 break-words" v-html="renderMessage(log.msg)"></div>
+                        </div>
+
+                        <div v-if="!(selectedMod.logs || []).length" class="opacity-40 text-sm">
+                            İşlem geçmişi bulunamadı.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </transition>
+    </div>
+
+    <script src="/assets/js/common.js"></script>
+    <script>
+        const { createApp } = Vue;
+
+        createApp({
+            data() {
+                return {
+                    sidebar: sidebarHtml('moderation'),
+
+                    mods: [],
+                    summary: {},
+                    recentActions: [],
+
+                    search: '',
+                    actionFilter: 'all',
+                    sortBy: 'total',
+                    excludeSystem: true,
+                    excludeBotrix: true,
+
+                    selectedMod: null,
+
+                    loading: true,
+                    error: '',
+                    currentFilter: getFilterState(),
+                    apiMeta: {},
+                    streamOptions: [],
+                    lastUpdatedAt: null,
+
+                    refreshTimer: null,
+                    refreshDebounce: null,
+                    socketRef: null,
+                    socketConnected: false
+                };
+            },
+
+            computed: {
+                currentLabel() {
+                    const selectedStream =
+                        this.currentFilter?.mode === 'stream'
+                            ? this.streamOptions.find(s => String(s.id) === String(this.currentFilter.stream_id))
+                            : null;
+
+                    return getReadableFilterLabel(this.currentFilter, this.apiMeta, selectedStream);
+                },
+
+                isLiveMode() {
+                    const mode = this.currentFilter?.mode || 'live';
+                    return mode === 'live' || mode === 'offstream_live';
+                },
+
+                filteredMods() {
+                    const q = String(this.search || '').toLowerCase().trim();
+
+                    let list = this.mods.filter(m => {
+                        const modName = String(m.n || '').toLowerCase();
+                        if (q && !modName.includes(q)) return false;
+
+                        if (this.actionFilter === 'all') return true;
+                        if (this.actionFilter === 'timeout') return (m.timeouts || 0) > 0;
+                        if (this.actionFilter === 'ban') return (m.bans || 0) > 0;
+                        if (this.actionFilter === 'unban') return (m.unbans || 0) > 0;
+                        if (this.actionFilter === 'delete' || this.actionFilter === 'deleted_message') return (m.deleted_messages || 0) > 0;
+
+                        return true;
+                    });
+
+                    if (this.sortBy === 'total') {
+                        list.sort((a, b) => (b.total_actions || 0) - (a.total_actions || 0));
+                    } else if (this.sortBy === 'timeouts') {
+                        list.sort((a, b) => (b.timeouts || 0) - (a.timeouts || 0));
+                    } else if (this.sortBy === 'bans') {
+                        list.sort((a, b) => (b.bans || 0) - (a.bans || 0));
+                    } else if (this.sortBy === 'unbans') {
+                        list.sort((a, b) => (b.unbans || 0) - (a.unbans || 0));
+                    } else if (this.sortBy === 'deletes') {
+                        list.sort((a, b) => (b.deleted_messages || 0) - (a.deleted_messages || 0));
+                    } else if (this.sortBy === 'recent') {
+                        list.sort((a, b) => new Date(b.last_action_at || 0) - new Date(a.last_action_at || 0));
+                    } else if (this.sortBy === 'name') {
+                        list.sort((a, b) => String(a.n || '').localeCompare(String(b.n || ''), 'tr'));
+                    }
+
+                    return list.slice(0, 100);
+                },
+
+                filteredRecentActions() {
+                    let list = this.recentActions.slice();
+
+                    if (this.search.trim()) {
+                        const q = this.search.toLowerCase();
+                        list = list.filter(action =>
+                            String(action.mod || '').toLowerCase().includes(q) ||
+                            String(action.target || '').toLowerCase().includes(q) ||
+                            String(action.reason || '').toLowerCase().includes(q)
+                        );
+                    }
+
+                    if (this.actionFilter !== 'all') {
+                        list = list.filter(action => {
+                            const a = String(action.action || '').toLowerCase();
+                            if (this.actionFilter === 'delete') {
+                                return a === 'delete' || a === 'deleted_message';
+                            }
+                            return a === this.actionFilter;
+                        });
+                    }
+
+                    return list.slice(0, 120);
+                },
+
+                lastUpdatedText() {
+                    if (!this.lastUpdatedAt) return '-';
+
+                    try {
+                        return new Date(this.lastUpdatedAt).toLocaleString('tr-TR');
+                    } catch (e) {
+                        return this.lastUpdatedAt;
+                    }
+                }
+            },
+
+            methods: {
+                getEntryName,
+                getEntryCount,
+                getActionColor,
+
+                isKickEmoteWord(word) {
+                    return /emote\d+[a-zA-Z]*/i.test(String(word || '').trim());
+                },
+
+                getKickEmoteId(word) {
+                    const match = String(word || '').trim().match(/emote(\d+)/i);
+                    return match ? match[1] : null;
+                },
+
+                getRemainingTextAfterEmote(word) {
+                    return String(word || '')
+                        .replace(/emote\d+[a-zA-Z]*/ig, '')
+                        .trim();
+                },
+
+                escapeHtml(text) {
+                    return String(text || '')
+                        .replace(/&/g, '&amp;')
+                        .replace(/</g, '&lt;')
+                        .replace(/>/g, '&gt;')
+                        .replace(/"/g, '&quot;')
+                        .replace(/'/g, '&#39;');
+                },
+
+                renderMessage(message) {
+                    const base = typeof parseMessage === 'function'
+                        ? String(parseMessage(message || ''))
+                        : this.escapeHtml(message || '');
+
+                    return base.replace(/emote(\d+)[a-zA-Z]*/ig, (_, id) => {
+                        return `<img src="https://files.kick.com/emotes/${id}/fullsize" alt="emote${id}" class="inline-block h-7 w-7 object-contain align-middle mx-0.5">`;
+                    });
+                },
+
+                formatEventDateTime(value) {
+                    if (!value) return '-';
+
+                    try {
+                        return new Date(value).toLocaleString('tr-TR');
+                    } catch (e) {
+                        return String(value);
+                    }
+                },
+
+                formatStreamLabel(stream) {
+                    if (!stream) return 'Yayın seç';
+
+                    if (stream.display_label) return stream.display_label;
+
+                    if (stream.label_date) {
+                        const suffix = stream.session_type === 'offstream' ? 'offstream' : 'yayını';
+                        return `${formatHumanDate(stream.label_date)} ${suffix}`;
+                    }
+
+                    const date = stream.started_at
+                        ? new Date(stream.started_at).toLocaleDateString('tr-TR')
+                        : '-';
+
+                    const started = stream.started_at
+                        ? new Date(stream.started_at).toLocaleTimeString('tr-TR', {
+                            hour: '2-digit',
+                            minute: '2-digit'
+                        })
+                        : '--:--';
+
+                    return `${date} · ${started}`;
+                },
+
+                syncFilterState() {
+                    this.currentFilter = setFilterState(this.currentFilter);
+                },
+
+                isFilteredUser(username) {
+                    const u = String(username || '').toLowerCase().trim();
+
+                    if (!u) return false;
+                    if (this.excludeSystem && (u === 'system' || u === 'kick system' || u === 'bot')) return true;
+                    if (this.excludeBotrix && u.includes('botrix')) return true;
+
+                    return false;
+                },
+
+                normalizeAction(action) {
+                    const a = String(action || '').toLowerCase().trim();
+
+                    if (a.includes('timeout')) return 'timeout';
+                    if (a.includes('unban')) return 'unban';
+                    if (a === 'ban' || a.includes('banned')) return 'ban';
+                    if (a.includes('delete')) return 'deleted_message';
+
+                    return a || 'unknown';
+                },
+
+                buildModeration(events) {
+                    const modsMap = {};
+                    const recent = [];
+
+                    const summary = {
+                        total_actions: 0,
+                        timeouts: 0,
+                        bans: 0,
+                        unbans: 0,
+                        deleted_messages: 0
+                    };
+
+                    for (const ev of (events || [])) {
+                        const eventType = String(ev.event_type || '').toLowerCase();
+                        if (eventType !== 'moderation') continue;
+
+                        const modName = ev.moderator || ev.mod || ev.username || 'Unknown Mod';
+                        if (this.isFilteredUser(modName)) continue;
+
+                        const action = this.normalizeAction(ev.action || ev.moderation_action || ev.type || '');
+                        const target = ev.target_user || ev.target || ev.affected_user || '';
+                        const reason = ev.reason || '';
+                        const duration = ev.duration || ev.timeout_duration || '';
+                        const msg = ev.message || ev.deleted_message || '';
+                        const t = ev.timestamp || ev.t || '';
+
+                        if (!modsMap[modName]) {
+                            modsMap[modName] = {
+                                n: modName,
+                                total_actions: 0,
+                                timeouts: 0,
+                                bans: 0,
+                                unbans: 0,
+                                deleted_messages: 0,
+                                topTargetMap: {},
+                                topReasonMap: {},
+                                logs: [],
+                                last_action_at: t || null
+                            };
+                        }
+
+                        const mod = modsMap[modName];
+                        mod.total_actions += 1;
+                        summary.total_actions += 1;
+
+                        if (action === 'timeout') {
+                            mod.timeouts += 1;
+                            summary.timeouts += 1;
+                        } else if (action === 'ban') {
+                            mod.bans += 1;
+                            summary.bans += 1;
+                        } else if (action === 'unban') {
+                            mod.unbans += 1;
+                            summary.unbans += 1;
+                        } else if (action === 'deleted_message' || action === 'delete') {
+                            mod.deleted_messages += 1;
+                            summary.deleted_messages += 1;
+                        }
+
+                        if (target) mod.topTargetMap[target] = (mod.topTargetMap[target] || 0) + 1;
+                        if (reason) mod.topReasonMap[reason] = (mod.topReasonMap[reason] || 0) + 1;
+
+                        if (!mod.last_action_at || new Date(t) > new Date(mod.last_action_at)) {
+                            mod.last_action_at = t;
+                        }
+
+                        const logEntry = {
+                            action,
+                            target,
+                            reason,
+                            duration,
+                            msg,
+                            t
+                        };
+
+                        mod.logs.push(logEntry);
+
+                        recent.push({
+                            key: `${modName}-${action}-${t}-${target}`,
+                            mod: modName,
+                            action,
+                            target,
+                            reason,
+                            duration,
+                            msg,
+                            t
+                        });
+                    }
+
+                    const mods = Object.values(modsMap).map(mod => {
+                        mod.top_targets = Object.entries(mod.topTargetMap)
+                            .map(([n, c]) => ({ n, c }))
+                            .sort((a, b) => b.c - a.c)
+                            .slice(0, 10);
+
+                        mod.top_reasons = Object.entries(mod.topReasonMap)
+                            .map(([r, c]) => ({ r, c }))
+                            .sort((a, b) => b.c - a.c)
+                            .slice(0, 10);
+
+                        mod.logs.sort((a, b) => new Date(b.t || 0) - new Date(a.t || 0));
+                        mod.logs = mod.logs.slice(0, 120);
+
+                        delete mod.topTargetMap;
+                        delete mod.topReasonMap;
+                        return mod;
+                    });
+
+                    recent.sort((a, b) => new Date(b.t || 0) - new Date(a.t || 0));
+
+                    return {
+                        mods,
+                        summary,
+                        recentActions: recent.slice(0, 150)
+                    };
+                },
+
+                async fetchStreamsForSelect() {
+                    try {
+                        this.streamOptions = await fetchStreams(100);
+
+                        if (this.currentFilter.mode === 'stream' && !this.currentFilter.stream_id && this.streamOptions.length > 0) {
+                            this.currentFilter.stream_id = String(this.streamOptions[0].id);
+                            this.syncFilterState();
+                        }
+                    } catch (err) {
+                        console.error('stream listesi alınamadı', err);
+                    }
+                },
+
+                async fetchModeration(showLoader = false) {
+                    if (showLoader) this.loading = true;
+                    this.error = '';
+
+                    try {
+                        this.syncFilterState();
+
+                        const result = await loadDashboardData(this.currentFilter);
+                        this.currentFilter = result.filter || this.currentFilter || getFilterState();
+                        this.apiMeta = result.apiData?.meta || {};
+
+                        const moderation =
+                            result?.transformed?.moderation ||
+                            result?.apiData?.summary?.moderation ||
+                            { summary: {}, mods: [], recent_actions: [] };
+
+                        this.mods = moderation.mods || [];
+                        this.summary = moderation.summary || {};
+                        this.recentActions = moderation.recent_actions || [];
+                        this.lastUpdatedAt = new Date().toISOString();
+
+                        if (this.selectedMod) {
+                            const found = this.mods.find(m => m.n === this.selectedMod.n);
+                            this.selectedMod = found || null;
+                        }
+                    } catch (err) {
+                        console.error('Moderation verisi yüklenemedi:', err);
+                        this.error = err?.message || 'Moderation verileri alınamadı.';
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                async handleModeChange() {
+                    if (this.currentFilter.mode === 'stream') {
+                        if (!this.currentFilter.stream_id && this.streamOptions.length > 0) {
+                            this.currentFilter.stream_id = String(this.streamOptions[0].id);
+                        }
+                    }
+
+                    if (this.currentFilter.mode !== 'stream') {
+                        this.currentFilter.stream_id = this.currentFilter.stream_id || '';
+                    }
+
+                    await this.handleFilterChange();
+                },
+
+                async handleFilterChange() {
+                    if (this.currentFilter.mode === 'stream' && !this.currentFilter.stream_id && this.streamOptions.length > 0) {
+                        this.currentFilter.stream_id = String(this.streamOptions[0].id);
+                    }
+
+                    this.syncFilterState();
+                    await this.fetchModeration(true);
+                    this.startAutoRefresh();
+                },
+
+                startAutoRefresh() {
+                    this.stopAutoRefresh();
+
+                    if (!this.isLiveMode) return;
+
+                    this.refreshTimer = setInterval(() => {
+                        this.fetchModeration(false);
+                    }, 10000);
+                },
+
+                stopAutoRefresh() {
+                    if (this.refreshTimer) {
+                        clearInterval(this.refreshTimer);
+                        this.refreshTimer = null;
+                    }
+                },
+
+                scheduleRefreshFromSocket() {
+                    if (!this.isLiveMode) return;
+
+                    if (this.refreshDebounce) {
+                        clearTimeout(this.refreshDebounce);
+                    }
+
+                    this.refreshDebounce = setTimeout(() => {
+                        this.fetchModeration(false);
+                    }, 1200);
+                },
+
+                initWebSocket() {
+                    try {
+                        const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+                        this.socketRef = new WebSocket(`${protocol}//${location.host}/ws`);
+
+                        this.socketRef.onopen = () => {
+                            this.socketConnected = true;
+                        };
+
+                        this.socketRef.onclose = () => {
+                            this.socketConnected = false;
+                            setTimeout(() => {
+                                this.initWebSocket();
+                            }, 5000);
+                        };
+
+                        this.socketRef.onerror = () => {
+                            this.socketConnected = false;
+                        };
+
+                        this.socketRef.onmessage = (event) => {
+                            try {
+                                const data = JSON.parse(event.data);
+
+                                if (!this.isLiveMode) return;
+
+                                if (
+                                    data.type === 'moderation' ||
+                                    data.type === 'system' ||
+                                    data.type === 'other' ||
+                                    data.type === 'bootstrap' ||
+                                    data.type === 'chat'
+                                ) {
+                                    this.scheduleRefreshFromSocket();
+                                }
+                            } catch (e) {
+                                console.error('WS parse hatası:', e);
+                            }
+                        };
+                    } catch (e) {
+                        console.error('WS başlatılamadı:', e);
+                        this.socketConnected = false;
+                    }
+                }
+            },
+
+            async mounted() {
+                await this.fetchStreamsForSelect();
+                await this.fetchModeration(true);
+                this.startAutoRefresh();
+                this.initWebSocket();
+
+                window.addEventListener('storage', async (event) => {
+                    if (event.key === 'rr_shared_filter_state_v1') {
+                        this.currentFilter = getFilterState();
+                        await this.fetchStreamsForSelect();
+                        await this.fetchModeration(true);
+                        this.startAutoRefresh();
+                    }
+                });
+            },
+
+            beforeUnmount() {
+                this.stopAutoRefresh();
+
+                if (this.refreshDebounce) {
+                    clearTimeout(this.refreshDebounce);
+                    this.refreshDebounce = null;
+                }
+
+                if (this.socketRef) {
+                    try {
+                        this.socketRef.close();
+                    } catch (e) {}
+                }
+            }
+        }).mount('#app');
+    </script>
+
+    <style>
+        .scroll-flat::-webkit-scrollbar { width: 5px; }
+        .scroll-flat::-webkit-scrollbar-track { background: transparent; }
+        .scroll-flat::-webkit-scrollbar-thumb { background: #22d3ee; border-radius: 10px; }
+    </style>
+</body>
+</html>

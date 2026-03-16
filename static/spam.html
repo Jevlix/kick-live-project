@@ -1,0 +1,796 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RRaenee Spam</title>
+
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/assets/css/style.css">
+</head>
+<body class="bg-[#05070a] text-gray-100 font-['Inter']">
+    <div id="app" class="flex h-screen overflow-hidden">
+        <div v-html="sidebar" class="flex"></div>
+
+        <main class="flex-1 flex flex-col overflow-hidden relative">
+            <header class="p-8 pb-4 flex flex-col gap-6">
+                <div class="flex justify-between items-end gap-6 flex-wrap">
+                    <div>
+                        <h2 class="text-4xl font-black text-red-400 uppercase tracking-tighter">Spam Raporu</h2>
+                        <p class="text-gray-400 mt-1">
+                            Aynı mesajı tekrar tekrar atan kullanıcılar ve spam tekrar kümeleri
+                        </p>
+
+                        <div class="flex flex-wrap gap-2 mt-4">
+                            <div class="px-3 py-1.5 rounded-xl border border-red-500/20 bg-red-500/10 text-red-300 text-xs font-bold uppercase tracking-wider">
+                                {{ currentLabel }}
+                            </div>
+
+                            <div
+                                class="px-3 py-1.5 rounded-xl border text-xs font-bold uppercase tracking-wider"
+                                :class="isAutoMode ? 'border-green-500/20 bg-green-500/10 text-green-300' : 'border-white/10 bg-white/5 text-gray-300'"
+                            >
+                                {{ isAutoMode ? 'Canlı Otomatik Yenileme Açık' : 'Statik Görünüm' }}
+                            </div>
+
+                            <div
+                                class="px-3 py-1.5 rounded-xl border text-xs font-bold uppercase tracking-wider"
+                                :class="socketConnected ? 'border-cyan-500/20 bg-cyan-500/10 text-cyan-300' : 'border-white/10 bg-white/5 text-gray-400'"
+                            >
+                                {{ socketConnected ? 'WS Bağlı' : 'WS Bekleniyor' }}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-3 gap-3 min-w-[460px]">
+                        <div class="bg-red-500/10 border border-red-500/20 px-5 py-4 rounded-2xl">
+                            <span class="text-red-400 font-bold block text-[11px] uppercase tracking-widest">Spam Kümesi</span>
+                            <span class="text-2xl font-black text-white">{{ filteredSpam.length }}</span>
+                        </div>
+
+                        <div class="bg-white/5 border border-white/10 px-5 py-4 rounded-2xl">
+                            <span class="text-gray-400 font-bold block text-[11px] uppercase tracking-widest">Toplam Tekrar</span>
+                            <span class="text-2xl font-black text-white">{{ totalSpamRepeats.toLocaleString('tr-TR') }}</span>
+                        </div>
+
+                        <div class="bg-white/5 border border-white/10 px-5 py-4 rounded-2xl">
+                            <span class="text-gray-400 font-bold block text-[11px] uppercase tracking-widest">Farklı Kullanıcı</span>
+                            <span class="text-2xl font-black text-white">{{ uniqueSpamUsers }}</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div
+                    v-if="apiMeta.warning"
+                    class="rounded-2xl border border-yellow-500/20 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-300 font-bold"
+                >
+                    <i class="fa fa-triangle-exclamation mr-2"></i>
+                    {{ apiMeta.warning }}
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
+                    <div>
+                        <label class="block text-[10px] uppercase font-black opacity-50 mb-2">Veri Modu</label>
+                        <select v-model="filter.mode" @change="handleModeChange" class="w-full bg-[#0b0f14] text-white border border-white/10 rounded-2xl px-4 py-3 text-sm font-black outline-none appearance-none">
+                            <option value="live">Canlı Yayın</option>
+                            <option value="offstream_live">Canlı Offstream</option>
+                            <option value="stream">Yayın Seç</option>
+                            <option value="day">Gün Seç</option>
+                            <option value="offstream_day">Offstream Gün</option>
+                            <option value="week">Son 7 Gün</option>
+                            <option value="month">Ay Seç</option>
+                            <option value="all">Tüm Zamanlar</option>
+                        </select>
+                    </div>
+
+                    <div v-if="filter.mode === 'stream'">
+                        <label class="block text-[10px] uppercase font-black opacity-50 mb-2">Yayın</label>
+                        <select v-model="filter.stream_id" @change="handleFilterChange" class="w-full bg-[#0b0f14] text-white border border-white/10 rounded-2xl px-4 py-3 text-sm font-black outline-none appearance-none">
+                            <option value="">Yayın seç</option>
+                            <option v-for="s in streamOptions" :key="String(s.id)" :value="String(s.id)">
+                                {{ formatStreamLabel(s) }}
+                            </option>
+                        </select>
+                    </div>
+
+                    <div v-if="filter.mode === 'day' || filter.mode === 'offstream_day'">
+                        <label class="block text-[10px] uppercase font-black opacity-50 mb-2">
+                            {{ filter.mode === 'offstream_day' ? 'Offstream Gün' : 'Gün' }}
+                        </label>
+                        <input
+                            v-model="filter.date"
+                            @change="handleFilterChange"
+                            type="date"
+                            class="w-full bg-[#0b0f14] text-white border border-white/10 rounded-2xl px-4 py-3 text-sm font-black outline-none"
+                        >
+                    </div>
+
+                    <div v-if="filter.mode === 'month'">
+                        <label class="block text-[10px] uppercase font-black opacity-50 mb-2">Ay</label>
+                        <input
+                            v-model="filter.month"
+                            @change="handleFilterChange"
+                            type="month"
+                            class="w-full bg-[#0b0f14] text-white border border-white/10 rounded-2xl px-4 py-3 text-sm font-black outline-none"
+                        >
+                    </div>
+
+                    <div class="xl:col-span-2">
+                        <label class="block text-[10px] uppercase font-black opacity-50 mb-2">Aktif Veri</label>
+                        <div class="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-sm font-black min-h-[50px] flex items-center">
+                            {{ currentLabel }}
+                        </div>
+                    </div>
+                </div>
+            </header>
+
+            <section class="px-8 pb-4">
+                <div class="max-w-7xl mx-auto bg-[#0d1117] border border-white/5 rounded-2xl p-4">
+                    <div class="grid grid-cols-1 xl:grid-cols-12 gap-3">
+                        <div class="xl:col-span-4">
+                            <label class="text-[11px] uppercase tracking-widest text-gray-500 font-black block mb-2">Spam Mesaj Ara</label>
+                            <div class="relative">
+                                <i class="fa fa-search absolute left-4 top-1/2 -translate-y-1/2 text-gray-500"></i>
+                                <input
+                                    v-model.trim="search"
+                                    type="text"
+                                    placeholder="Mesaj içinde ara..."
+                                    class="w-full bg-[#090c10] border border-white/10 rounded-2xl pl-11 pr-4 py-3 text-white outline-none focus:border-red-500/40"
+                                >
+                            </div>
+                        </div>
+
+                        <div class="xl:col-span-2">
+                            <label class="text-[11px] uppercase tracking-widest text-gray-500 font-black block mb-2">Min Tekrar</label>
+                            <input
+                                v-model.number="minRepeat"
+                                type="number"
+                                min="2"
+                                class="w-full bg-[#090c10] border border-white/10 rounded-2xl px-4 py-3 text-white outline-none focus:border-red-500/40"
+                            >
+                        </div>
+
+                        <div class="xl:col-span-2">
+                            <label class="text-[11px] uppercase tracking-widest text-gray-500 font-black block mb-2">Sıralama</label>
+                            <select
+                                v-model="sortBy"
+                                class="w-full bg-[#090c10] border border-white/10 rounded-2xl px-4 py-3 text-white outline-none focus:border-red-500/40"
+                            >
+                                <option value="count">Tekrar</option>
+                                <option value="unique_users">Farklı Kullanıcı</option>
+                                <option value="recent">Son Görülme</option>
+                                <option value="length">Karakter</option>
+                            </select>
+                        </div>
+
+                        <div class="xl:col-span-4">
+                            <label class="text-[11px] uppercase tracking-widest text-gray-500 font-black block mb-2">Filtreler</label>
+                            <div class="flex flex-wrap gap-2 h-[50px] items-center">
+                                <button
+                                    @click="excludeSystem = !excludeSystem"
+                                    class="px-3 py-2 rounded-xl border text-xs font-bold transition"
+                                    :class="excludeSystem ? 'bg-pink-500/10 text-pink-300 border-pink-500/20' : 'bg-white/5 text-gray-400 border-white/10'"
+                                >
+                                    System Hariç
+                                </button>
+
+                                <button
+                                    @click="excludeBotrix = !excludeBotrix"
+                                    class="px-3 py-2 rounded-xl border text-xs font-bold transition"
+                                    :class="excludeBotrix ? 'bg-cyan-500/10 text-cyan-300 border-cyan-500/20' : 'bg-white/5 text-gray-400 border-white/10'"
+                                >
+                                    BotRix Hariç
+                                </button>
+
+                                <button
+                                    @click="fetchSpam(true)"
+                                    class="px-3 py-2 rounded-xl border border-red-500/20 bg-red-500/10 text-red-300 text-xs font-bold transition hover:bg-red-500/15"
+                                >
+                                    Yenile
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="flex flex-wrap items-center justify-between gap-3 mt-4 pt-4 border-t border-white/5 text-xs">
+                        <div class="text-gray-500">
+                            Son veri çekme:
+                            <span class="text-gray-300 font-semibold">{{ lastUpdatedText }}</span>
+                        </div>
+
+                        <div class="text-gray-500">
+                            Gösterilen:
+                            <span class="text-white font-black">{{ filteredSpam.length }}</span>
+                            /
+                            <span class="text-gray-300">{{ spam.length }}</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="page-section flex-1 p-8 pt-0 scroll-flat overflow-y-auto">
+                <div class="max-w-7xl mx-auto space-y-4">
+                    <div v-if="loading" class="bg-[#0f1218] border border-white/5 rounded-2xl p-8 text-center text-gray-400">
+                        <i class="fa fa-spinner fa-spin mr-2"></i> Spam verileri yükleniyor...
+                    </div>
+
+                    <div v-else-if="error" class="bg-red-500/10 border border-red-500/20 rounded-2xl p-6 text-red-300">
+                        <div class="font-black uppercase tracking-wider mb-1">Veri Hatası</div>
+                        <div class="text-sm">{{ error }}</div>
+                    </div>
+
+                    <template v-else>
+                        <div
+                            v-for="(s, i) in filteredSpam"
+                            :key="s.key"
+                            @click="selectedSpam = s"
+                            class="glass p-6 rounded-[32px] hover:border-red-500 transition cursor-pointer border border-white/5"
+                        >
+                            <div class="flex justify-between items-start gap-4 mb-4">
+                                <div class="min-w-0 flex-1">
+                                    <p class="text-xs font-black uppercase tracking-widest text-red-400 mb-2">Spam Mesaj</p>
+                                    <div class="font-black text-lg break-words" v-html="renderMessage(s.m || '-')"></div>
+                                </div>
+
+                                <div class="text-right shrink-0">
+                                    <span class="text-4xl font-black text-white/5 block">#{{ i + 1 }}</span>
+                                    <span class="text-[10px] uppercase tracking-widest text-gray-500">Sıralama</span>
+                                </div>
+                            </div>
+
+                            <div class="grid grid-cols-2 md:grid-cols-5 gap-3 text-center text-[10px] font-black uppercase tracking-tighter">
+                                <div class="bg-white/5 p-4 rounded-2xl border border-white/5">
+                                    <p class="text-red-400 text-2xl">{{ s.c || 0 }}</p>Tekrar
+                                </div>
+
+                                <div class="bg-white/5 p-4 rounded-2xl border border-white/5">
+                                    <p class="text-blue-400 text-2xl">{{ s.unique_users || 0 }}</p>Farklı Kullanıcı
+                                </div>
+
+                                <div class="bg-white/5 p-4 rounded-2xl border border-white/5">
+                                    <p class="text-pink-400 text-2xl">{{ (s.m || '').length }}</p>Karakter
+                                </div>
+
+                                <div class="bg-white/5 p-4 rounded-2xl border border-white/5">
+                                    <p class="text-yellow-400 text-sm font-black">{{ formatEventTime(s.last_t) }}</p>Son Saat
+                                </div>
+
+                                <div class="bg-white/5 p-4 rounded-2xl border border-white/5">
+                                    <p class="text-cyan-400 text-sm font-black truncate">{{ s.top?.[0]?.u || '-' }}</p>En Çok Atan
+                                </div>
+                            </div>
+                        </div>
+
+                        <div
+                            v-if="!filteredSpam.length"
+                            class="bg-[#0f1218] border border-white/5 rounded-2xl p-8 text-center text-gray-400"
+                        >
+                            Filtreye uygun spam kaydı bulunamadı.
+                        </div>
+                    </template>
+                </div>
+            </section>
+        </main>
+
+        <transition name="modal">
+            <div v-if="selectedSpam" class="fixed inset-0 flex justify-end z-[1000]">
+                <div @click="selectedSpam = null" class="absolute inset-0 bg-black/80 backdrop-blur-md"></div>
+
+                <div class="w-full max-w-2xl glass h-full shadow-2xl flex flex-col z-10 border-l border-white/10 text-white">
+                    <div class="p-10 border-b border-white/5">
+                        <div class="flex justify-between items-start gap-4">
+                            <div class="flex-1 min-w-0">
+                                <span class="text-red-400 font-black text-xs uppercase italic">Spam Detayı</span>
+                                <div class="text-2xl md:text-4xl font-black mt-4 tracking-tight break-words" v-html="renderMessage(selectedSpam.m)"></div>
+                            </div>
+
+                            <button @click="selectedSpam = null" class="text-5xl hover:text-red-500 transition leading-none ml-4">&times;</button>
+                        </div>
+
+                        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mt-8 text-center text-[10px] font-black uppercase tracking-tighter">
+                            <div class="bg-white/5 p-4 rounded-3xl border border-white/5">
+                                <p class="text-red-400 text-2xl">{{ selectedSpam.c || 0 }}</p>Toplam Tekrar
+                            </div>
+
+                            <div class="bg-white/5 p-4 rounded-3xl border border-white/5">
+                                <p class="text-blue-400 text-2xl">{{ selectedSpam.unique_users || 0 }}</p>Farklı Kullanıcı
+                            </div>
+
+                            <div class="bg-white/5 p-4 rounded-3xl border border-white/5">
+                                <p class="text-pink-400 text-2xl">{{ (selectedSpam.m || '').length }}</p>Karakter
+                            </div>
+
+                            <div class="bg-white/5 p-4 rounded-3xl border border-white/5">
+                                <p class="text-yellow-400 text-sm font-black">{{ formatEventTime(selectedSpam.last_t) }}</p>Son Görülme
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="flex-1 overflow-y-auto p-10 bg-black/30 space-y-4 scroll-flat">
+                        <p class="text-[10px] font-black opacity-30 uppercase italic">Bu mesajı en çok atan kullanıcılar</p>
+
+                        <div
+                            v-for="(u, i) in selectedSpam.top"
+                            :key="i"
+                            class="p-5 rounded-[24px] bg-white/5 border-l-4 border-red-500 text-sm flex justify-between items-center gap-4"
+                        >
+                            <span class="font-black break-all">{{ u.u }}</span>
+                            <span class="text-red-400 font-black text-lg">{{ u.c }}</span>
+                        </div>
+
+                        <div v-if="!selectedSpam.top?.length" class="opacity-40 text-sm">
+                            Kullanıcı verisi bulunamadı.
+                        </div>
+
+                        <div class="pt-4 border-t border-white/5">
+                            <p class="text-[10px] font-black opacity-30 uppercase italic mb-3">İlk / Son Görülme</p>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <div class="bg-white/5 rounded-2xl p-4 border border-white/5">
+                                    <div class="text-[10px] uppercase tracking-widest text-gray-500 font-black mb-1">İlk</div>
+                                    <div class="font-bold text-sm">{{ formatEventDateTime(selectedSpam.first_t) }}</div>
+                                </div>
+
+                                <div class="bg-white/5 rounded-2xl p-4 border border-white/5">
+                                    <div class="text-[10px] uppercase tracking-widest text-gray-500 font-black mb-1">Son</div>
+                                    <div class="font-bold text-sm">{{ formatEventDateTime(selectedSpam.last_t) }}</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </transition>
+    </div>
+
+    <script src="/assets/js/common.js"></script>
+    <script>
+        const { createApp } = Vue;
+
+        createApp({
+            data() {
+                return {
+                    sidebar: sidebarHtml('spam'),
+
+                    spam: [],
+                    search: '',
+                    minRepeat: 3,
+                    sortBy: 'count',
+                    excludeSystem: true,
+                    excludeBotrix: true,
+
+                    selectedSpam: null,
+
+                    loading: true,
+                    error: '',
+                    currentFilter: getFilterState(),
+                    apiMeta: {},
+                    streamOptions: [],
+                    lastUpdatedAt: null,
+
+                    refreshTimer: null,
+                    refreshDebounce: null,
+                    socketRef: null,
+                    socketConnected: false
+                };
+            },
+
+            computed: {
+                currentLabel() {
+                    const selectedStream =
+                        this.currentFilter?.mode === 'stream'
+                            ? this.streamOptions.find(s => String(s.id) === String(this.currentFilter.stream_id))
+                            : null;
+
+                    return getReadableFilterLabel(this.currentFilter, this.apiMeta, selectedStream);
+                },
+
+                isAutoMode() {
+                    const mode = this.currentFilter?.mode || 'live';
+                    return mode === 'live' || mode === 'offstream_live';
+                },
+
+                filteredSpam() {
+                    const q = String(this.search || '').toLowerCase().trim();
+
+                    let list = this.spam.filter(item => {
+                        if ((item.c || 0) < (this.minRepeat || 3)) return false;
+                        if (!q) return true;
+                        return String(item.m || '').toLowerCase().includes(q);
+                    });
+
+                    if (this.sortBy === 'count') {
+                        list.sort((a, b) => b.c - a.c || b.unique_users - a.unique_users);
+                    } else if (this.sortBy === 'unique_users') {
+                        list.sort((a, b) => b.unique_users - a.unique_users || b.c - a.c);
+                    } else if (this.sortBy === 'recent') {
+                        list.sort((a, b) => new Date(b.last_t || 0) - new Date(a.last_t || 0));
+                    } else if (this.sortBy === 'length') {
+                        list.sort((a, b) => (b.m || '').length - (a.m || '').length || b.c - a.c);
+                    }
+
+                    return list.slice(0, 100);
+                },
+
+                totalSpamRepeats() {
+                    return this.filteredSpam.reduce((sum, item) => sum + (item.c || 0), 0);
+                },
+
+                uniqueSpamUsers() {
+                    const set = new Set();
+                    for (const item of this.filteredSpam) {
+                        for (const user of (item.top || [])) {
+                            if (user.u) set.add(user.u);
+                        }
+                    }
+                    return set.size;
+                },
+
+                lastUpdatedText() {
+                    if (!this.lastUpdatedAt) return '-';
+
+                    try {
+                        return new Date(this.lastUpdatedAt).toLocaleString('tr-TR');
+                    } catch (e) {
+                        return this.lastUpdatedAt;
+                    }
+                },
+
+                filter: {
+                    get() {
+                        return this.currentFilter;
+                    },
+                    set(value) {
+                        this.currentFilter = value;
+                    }
+                }
+            },
+
+            methods: {
+                isKickEmoteWord(word) {
+                    return /emote\d+[a-zA-Z]*/i.test(String(word || '').trim());
+                },
+
+                getKickEmoteId(word) {
+                    const match = String(word || '').trim().match(/emote(\d+)/i);
+                    return match ? match[1] : null;
+                },
+
+                getRemainingTextAfterEmote(word) {
+                    return String(word || '')
+                        .replace(/emote\d+[a-zA-Z]*/ig, '')
+                        .trim();
+                },
+
+                escapeHtml(text) {
+                    return String(text || '')
+                        .replace(/&/g, '&amp;')
+                        .replace(/</g, '&lt;')
+                        .replace(/>/g, '&gt;')
+                        .replace(/"/g, '&quot;')
+                        .replace(/'/g, '&#39;');
+                },
+
+                renderMessage(message) {
+                    const base = typeof parseMessage === 'function'
+                        ? String(parseMessage(message || ''))
+                        : this.escapeHtml(message || '');
+
+                    return base.replace(/emote(\d+)[a-zA-Z]*/ig, (_, id) => {
+                        return `<img src="https://files.kick.com/emotes/${id}/fullsize" alt="emote${id}" class="inline-block h-7 w-7 object-contain align-middle mx-0.5">`;
+                    });
+                },
+
+                formatEventTime(value) {
+                    if (!value) return '-';
+
+                    try {
+                        return new Date(value).toLocaleTimeString('tr-TR', {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            second: '2-digit'
+                        });
+                    } catch (e) {
+                        return '-';
+                    }
+                },
+
+                formatEventDateTime(value) {
+                    if (!value) return '-';
+
+                    try {
+                        return new Date(value).toLocaleString('tr-TR');
+                    } catch (e) {
+                        return String(value);
+                    }
+                },
+
+                formatStreamLabel(stream) {
+                    if (!stream) return 'Yayın seç';
+
+                    if (stream.display_label) return stream.display_label;
+
+                    if (stream.label_date) {
+                        const suffix = stream.session_type === 'offstream' ? 'offstream' : 'yayını';
+                        return `${formatHumanDate(stream.label_date)} ${suffix}`;
+                    }
+
+                    const date = stream.started_at
+                        ? new Date(stream.started_at).toLocaleDateString('tr-TR')
+                        : '-';
+
+                    const started = stream.started_at
+                        ? new Date(stream.started_at).toLocaleTimeString('tr-TR', {
+                            hour: '2-digit',
+                            minute: '2-digit'
+                        })
+                        : '--:--';
+
+                    return `${date} · ${started}`;
+                },
+
+                syncFilterState() {
+                    this.currentFilter = setFilterState(this.currentFilter);
+                },
+
+                isFilteredUser(username) {
+                    const u = String(username || '').toLowerCase().trim();
+
+                    if (!u) return false;
+                    if (this.excludeSystem && (u === 'system' || u === 'kick system' || u === 'bot')) return true;
+                    if (this.excludeBotrix && u.includes('botrix')) return true;
+
+                    return false;
+                },
+
+                buildRichSpam(events) {
+                    const byMessage = {};
+                    const userLast = {};
+
+                    for (const ev of (events || [])) {
+                        if (ev.event_type !== 'chat') continue;
+                        if (!ev.username) continue;
+                        if (this.isFilteredUser(ev.username)) continue;
+
+                        const username = ev.username;
+                        const message = String(ev.message || '').trim();
+                        const timestamp = ev.timestamp || null;
+
+                        if (!message) continue;
+
+                        const userKey = String(username).toLowerCase();
+                        if (!userLast[userKey]) {
+                            userLast[userKey] = {
+                                msg: message,
+                                count: 1
+                            };
+                            continue;
+                        }
+
+                        if (userLast[userKey].msg === message) {
+                            userLast[userKey].count += 1;
+
+                            if (userLast[userKey].count >= 3) {
+                                const key = message.toLowerCase();
+
+                                if (!byMessage[key]) {
+                                    byMessage[key] = {
+                                        key,
+                                        m: message,
+                                        c: 0,
+                                        uniqueUserSet: new Set(),
+                                        userMap: {},
+                                        first_t: timestamp,
+                                        last_t: timestamp,
+                                        top: []
+                                    };
+                                }
+
+                                const row = byMessage[key];
+                                row.c += 1;
+                                row.uniqueUserSet.add(username);
+                                row.userMap[username] = (row.userMap[username] || 0) + 1;
+
+                                if (!row.first_t || new Date(timestamp) < new Date(row.first_t)) {
+                                    row.first_t = timestamp;
+                                }
+
+                                if (!row.last_t || new Date(timestamp) > new Date(row.last_t)) {
+                                    row.last_t = timestamp;
+                                }
+                            }
+                        } else {
+                            userLast[userKey] = {
+                                msg: message,
+                                count: 1
+                            };
+                        }
+                    }
+
+                    return Object.values(byMessage).map(item => {
+                        item.unique_users = item.uniqueUserSet.size;
+                        item.top = Object.entries(item.userMap)
+                            .map(([u, c]) => ({ u, c }))
+                            .sort((a, b) => b.c - a.c)
+                            .slice(0, 10);
+
+                        delete item.uniqueUserSet;
+                        delete item.userMap;
+                        return item;
+                    });
+                },
+
+                async fetchStreamsForSelect() {
+                    try {
+                        this.streamOptions = await fetchStreams(100);
+
+                        if (this.currentFilter.mode === 'stream' && !this.currentFilter.stream_id && this.streamOptions.length > 0) {
+                            this.currentFilter.stream_id = String(this.streamOptions[0].id);
+                            this.syncFilterState();
+                        }
+                    } catch (err) {
+                        console.error('stream listesi alınamadı', err);
+                    }
+                },
+
+                async fetchSpam(showLoader = false) {
+                    if (showLoader) this.loading = true;
+                    this.error = '';
+
+                    try {
+                        this.syncFilterState();
+
+                        const result = await loadDashboardData(this.currentFilter);
+                        this.currentFilter = result.filter || this.currentFilter || getFilterState();
+                        this.apiMeta = result.apiData?.meta || {};
+                        this.spam = this.buildRichSpam(result.transformed?.rawEvents || []);
+                        this.lastUpdatedAt = new Date().toISOString();
+
+                        if (this.selectedSpam) {
+                            const newSelected = this.spam.find(x => x.key === this.selectedSpam.key);
+                            this.selectedSpam = newSelected || null;
+                        }
+                    } catch (err) {
+                        console.error('Spam verisi yüklenemedi:', err);
+                        this.error = err?.message || 'Spam verileri alınamadı.';
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                async handleModeChange() {
+                    if (this.currentFilter.mode === 'stream') {
+                        if (!this.currentFilter.stream_id && this.streamOptions.length > 0) {
+                            this.currentFilter.stream_id = String(this.streamOptions[0].id);
+                        }
+                    }
+
+                    if (this.currentFilter.mode !== 'stream') {
+                        this.currentFilter.stream_id = this.currentFilter.stream_id || '';
+                    }
+
+                    await this.handleFilterChange();
+                },
+
+                async handleFilterChange() {
+                    if (this.currentFilter.mode === 'stream' && !this.currentFilter.stream_id && this.streamOptions.length > 0) {
+                        this.currentFilter.stream_id = String(this.streamOptions[0].id);
+                    }
+
+                    this.syncFilterState();
+                    await this.fetchSpam(true);
+                    this.startAutoRefresh();
+                },
+
+                startAutoRefresh() {
+                    this.stopAutoRefresh();
+
+                    if (!this.isAutoMode) return;
+
+                    this.refreshTimer = setInterval(() => {
+                        this.fetchSpam(false);
+                    }, 10000);
+                },
+
+                stopAutoRefresh() {
+                    if (this.refreshTimer) {
+                        clearInterval(this.refreshTimer);
+                        this.refreshTimer = null;
+                    }
+                },
+
+                scheduleRefreshFromSocket() {
+                    if (!this.isAutoMode) return;
+
+                    if (this.refreshDebounce) {
+                        clearTimeout(this.refreshDebounce);
+                    }
+
+                    this.refreshDebounce = setTimeout(() => {
+                        this.fetchSpam(false);
+                    }, 1200);
+                },
+
+                initWebSocket() {
+                    try {
+                        const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+                        this.socketRef = new WebSocket(`${protocol}//${location.host}/ws`);
+
+                        this.socketRef.onopen = () => {
+                            this.socketConnected = true;
+                        };
+
+                        this.socketRef.onclose = () => {
+                            this.socketConnected = false;
+
+                            setTimeout(() => {
+                                this.initWebSocket();
+                            }, 5000);
+                        };
+
+                        this.socketRef.onerror = () => {
+                            this.socketConnected = false;
+                        };
+
+                        this.socketRef.onmessage = (event) => {
+                            try {
+                                const data = JSON.parse(event.data);
+
+                                if (!this.isAutoMode) return;
+
+                                if (data.type === 'chat' || data.type === 'system' || data.type === 'other' || data.type === 'bootstrap') {
+                                    this.scheduleRefreshFromSocket();
+                                }
+                            } catch (e) {
+                                console.error('WS parse hatası:', e);
+                            }
+                        };
+                    } catch (e) {
+                        console.error('WS başlatılamadı:', e);
+                        this.socketConnected = false;
+                    }
+                }
+            },
+
+            async mounted() {
+                await this.fetchStreamsForSelect();
+                await this.fetchSpam(true);
+                this.startAutoRefresh();
+                this.initWebSocket();
+
+                window.addEventListener('storage', async (event) => {
+                    if (event.key === 'rr_shared_filter_state_v1') {
+                        this.currentFilter = getFilterState();
+                        await this.fetchStreamsForSelect();
+                        await this.fetchSpam(true);
+                        this.startAutoRefresh();
+                    }
+                });
+            },
+
+            beforeUnmount() {
+                this.stopAutoRefresh();
+
+                if (this.refreshDebounce) {
+                    clearTimeout(this.refreshDebounce);
+                    this.refreshDebounce = null;
+                }
+
+                if (this.socketRef) {
+                    try {
+                        this.socketRef.close();
+                    } catch (e) {}
+                }
+            }
+        }).mount('#app');
+    </script>
+
+    <style>
+        .scroll-flat::-webkit-scrollbar { width: 5px; }
+        .scroll-flat::-webkit-scrollbar-track { background: transparent; }
+        .scroll-flat::-webkit-scrollbar-thumb { background: #ef4444; border-radius: 10px; }
+    </style>
+</body>
+</html>

@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RRaenee Words</title>
+
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/assets/css/style.css">
+</head>
+<body>
+    <div id="app" class="flex h-screen overflow-hidden">
+        <div v-html="sidebar"></div>
+
+        <main class="flex-1 flex flex-col overflow-hidden relative">
+            <header class="p-6 border-b border-white/5 bg-[#05070a] flex flex-col gap-4">
+                <div class="flex justify-between items-center gap-4 flex-wrap">
+                    <h2 class="text-xl font-black text-pink-500 uppercase italic">KELİME SIRALAMASI</h2>
+
+                    <div class="flex items-center gap-3 flex-wrap">
+                        <input
+                            v-model="search"
+                            type="text"
+                            placeholder="Kelime ara..."
+                            class="bg-[#0f1218] border border-white/10 rounded-2xl px-6 py-3 w-72 outline-none text-white"
+                        >
+
+                        <button
+                            v-if="isAutoMode"
+                            @click="fetchPageData"
+                            class="bg-pink-600 hover:bg-pink-500 transition text-white font-black rounded-2xl px-5 py-3 text-sm"
+                        >
+                            Yenile
+                        </button>
+                    </div>
+                </div>
+
+                <div
+                    v-if="apiMeta.warning"
+                    class="rounded-2xl border border-yellow-500/20 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-300 font-bold"
+                >
+                    <i class="fa fa-triangle-exclamation mr-2"></i>
+                    {{ apiMeta.warning }}
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
+                    <div>
+                        <label class="block text-[10px] uppercase font-black opacity-50 mb-2">Veri Modu</label>
+                        <select v-model="filter.mode" @change="handleModeChange" class="w-full bg-[#0b0f14] text-white border border-white/10 rounded-2xl px-4 py-3 text-sm font-black outline-none appearance-none">
+                            <option value="live">Canlı Yayın</option>
+                            <option value="offstream_live">Canlı Offstream</option>
+                            <option value="stream">Yayın Seç</option>
+                            <option value="day">Gün Seç</option>
+                            <option value="offstream_day">Offstream Gün</option>
+                            <option value="week">Son 7 Gün</option>
+                            <option value="month">Ay Seç</option>
+                            <option value="all">Tüm Zamanlar</option>
+                        </select>
+                    </div>
+
+                    <div v-if="filter.mode === 'stream'">
+                        <label class="block text-[10px] uppercase font-black opacity-50 mb-2">Yayın</label>
+                        <select v-model="filter.stream_id" @change="handleFilterChange" class="w-full bg-[#0b0f14] text-white border border-white/10 rounded-2xl px-4 py-3 text-sm font-black outline-none appearance-none">
+                            <option value="">Yayın seç</option>
+                            <option v-for="s in streamOptions" :key="String(s.id)" :value="String(s.id)">
+                                {{ formatStreamLabel(s) }}
+                            </option>
+                        </select>
+                    </div>
+
+                    <div v-if="filter.mode === 'day' || filter.mode === 'offstream_day'">
+                        <label class="block text-[10px] uppercase font-black opacity-50 mb-2">
+                            {{ filter.mode === 'offstream_day' ? 'Offstream Gün' : 'Gün' }}
+                        </label>
+                        <input
+                            v-model="filter.date"
+                            @change="handleFilterChange"
+                            type="date"
+                            class="w-full bg-[#0b0f14] text-white border border-white/10 rounded-2xl px-4 py-3 text-sm font-black outline-none"
+                        >
+                    </div>
+
+                    <div v-if="filter.mode === 'month'">
+                        <label class="block text-[10px] uppercase font-black opacity-50 mb-2">Ay</label>
+                        <input
+                            v-model="filter.month"
+                            @change="handleFilterChange"
+                            type="month"
+                            class="w-full bg-[#0b0f14] text-white border border-white/10 rounded-2xl px-4 py-3 text-sm font-black outline-none"
+                        >
+                    </div>
+
+                    <div class="xl:col-span-2">
+                        <label class="block text-[10px] uppercase font-black opacity-50 mb-2">Aktif Veri</label>
+                        <div class="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-sm font-black min-h-[50px] flex items-center">
+                            {{ currentLabel }}
+                        </div>
+                    </div>
+                </div>
+            </header>
+
+            <section class="page-section flex-1 p-8 scroll-flat">
+                <div class="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-5 gap-4 mb-8">
+                    <div class="stat-card">
+                        <p class="opacity-50 text-xs font-bold mb-1 uppercase tracking-widest">Toplam Kelime</p>
+                        <h3 class="text-3xl font-black text-pink-400">{{ words.length }}</h3>
+                    </div>
+
+                    <div class="stat-card">
+                        <p class="opacity-50 text-xs font-bold mb-1 uppercase tracking-widest">Toplam Mesaj</p>
+                        <h3 class="text-3xl font-black text-pink-400">{{ stats.total_msgs || 0 }}</h3>
+                    </div>
+
+                    <div class="stat-card">
+                        <p class="opacity-50 text-xs font-bold mb-1 uppercase tracking-widest">Toplam Kullanıcı</p>
+                        <h3 class="text-3xl font-black text-blue-400">{{ stats.total_users || 0 }}</h3>
+                    </div>
+
+                    <div class="stat-card">
+                        <p class="opacity-50 text-xs font-bold mb-1 uppercase tracking-widest">Arama Sonucu</p>
+                        <h3 class="text-3xl font-black text-green-400">{{ filteredWords.length }}</h3>
+                    </div>
+
+                    <div class="stat-card">
+                        <p class="opacity-50 text-xs font-bold mb-1 uppercase tracking-widest">Canlı Otomatik</p>
+                        <h3 class="text-3xl font-black" :class="isAutoMode ? 'text-green-400' : 'text-red-400'">
+                            {{ isAutoMode ? 'AÇIK' : 'KAPALI' }}
+                        </h3>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                    <div
+                        v-for="(w, i) in filteredWords"
+                        :key="w.w + '_' + i"
+                        @click="selectedWord = w"
+                        class="glass p-6 rounded-[32px] hover:border-pink-600 transition cursor-pointer relative group"
+                    >
+                        <div class="flex justify-between items-start mb-6 gap-4">
+                            <div class="pr-2 min-w-0 flex-1">
+                                <template v-if="isKickEmoteWord(w.w)">
+                                    <div class="flex items-center gap-3 min-h-[48px] flex-wrap">
+                                        <img
+                                            :src="getKickEmoteUrl(w.w)"
+                                            :alt="w.w"
+                                            class="h-12 w-12 object-contain shrink-0"
+                                            loading="lazy"
+                                            @error="handleEmoteImageError"
+                                        >
+                                        <span
+                                            v-if="getRemainingTextAfterEmote(w.w)"
+                                            class="font-black text-2xl uppercase italic break-all"
+                                        >
+                                            {{ getRemainingTextAfterEmote(w.w) }}
+                                        </span>
+                                    </div>
+                                </template>
+                                <template v-else>
+                                    <h5 class="font-black text-2xl uppercase italic break-all">{{ w.w }}</h5>
+                                </template>
+                            </div>
+
+                            <span class="text-5xl font-black text-white/5 group-hover:text-pink-600 whitespace-nowrap">#{{ getWordRank(w) }}</span>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-3 text-center text-[10px] font-black uppercase tracking-tighter">
+                            <div class="bg-white/5 p-4 rounded-2xl border border-white/5">
+                                <p class="text-pink-400 text-2xl">{{ w.c || 0 }}</p>Kullanım
+                            </div>
+                            <div class="bg-white/5 p-4 rounded-2xl border border-white/5">
+                                <p class="text-blue-400 text-2xl">{{ w.unique_users || 0 }}</p>Farklı Chat Kullanıcısı
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <transition name="modal">
+            <div v-if="selectedWord" class="fixed inset-0 flex justify-end z-[1000]">
+                <div @click="selectedWord = null" class="absolute inset-0 bg-black/80 backdrop-blur-md"></div>
+
+                <div class="w-full max-w-2xl glass h-full shadow-2xl flex flex-col z-10 border-l border-white/10 text-white">
+                    <div class="p-10 border-b border-white/5">
+                        <div class="flex justify-between items-start gap-4">
+                            <div class="flex-1 min-w-0">
+                                <span class="text-pink-500 font-black text-xs uppercase italic">Kelime Detayı</span>
+
+                                <template v-if="selectedWord && isKickEmoteWord(selectedWord.w)">
+                                    <div class="mt-4 flex items-center gap-4 flex-wrap">
+                                        <img
+                                            :src="getKickEmoteUrl(selectedWord.w)"
+                                            :alt="selectedWord.w"
+                                            class="h-20 w-20 object-contain shrink-0"
+                                            loading="lazy"
+                                            @error="handleEmoteImageError"
+                                        >
+                                        <div
+                                            v-if="getRemainingTextAfterEmote(selectedWord.w)"
+                                            class="text-4xl md:text-6xl font-black italic uppercase tracking-tighter break-all"
+                                        >
+                                            {{ getRemainingTextAfterEmote(selectedWord.w) }}
+                                        </div>
+                                        <div
+                                            v-else
+                                            class="text-xs opacity-50 break-all font-black"
+                                        >
+                                            {{ selectedWord.w }}
+                                        </div>
+                                    </div>
+                                </template>
+                                <template v-else>
+                                    <h2 class="text-4xl md:text-6xl font-black mt-2 italic uppercase tracking-tighter break-all">{{ selectedWord.w }}</h2>
+                                </template>
+                            </div>
+
+                            <button @click="selectedWord = null" class="text-5xl hover:text-red-500 transition leading-none ml-4">&times;</button>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-4 mt-8 text-center text-[10px] font-black uppercase tracking-tighter">
+                            <div class="bg-white/5 p-4 rounded-3xl border border-white/5">
+                                <p class="text-pink-400 text-2xl">{{ selectedWord.c || 0 }}</p>Toplam Kullanım
+                            </div>
+                            <div class="bg-white/5 p-4 rounded-3xl border border-white/5">
+                                <p class="text-blue-400 text-2xl">{{ selectedWord.unique_users || 0 }}</p>Farklı Chat Kullanıcısı
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="flex-1 overflow-y-auto p-10 bg-black/30 space-y-4 scroll-flat">
+                        <p class="text-[10px] font-black opacity-30 uppercase italic">Bu kelimeyi en çok kullanan 10 kullanıcı</p>
+
+                        <div
+                            v-for="(u, i) in getWordUsers(selectedWord)"
+                            :key="i"
+                            class="p-5 rounded-[24px] bg-white/5 border-l-4 border-pink-500 text-sm flex justify-between items-center gap-4"
+                        >
+                            <span class="font-black break-all">{{ u.name }}</span>
+                            <span class="text-pink-400 font-black text-lg">{{ u.count }}</span>
+                        </div>
+
+                        <div v-if="!getWordUsers(selectedWord).length" class="opacity-40 text-sm">
+                            Kullanıcı verisi bulunamadı.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </transition>
+    </div>
+
+    <script src="/assets/js/common.js"></script>
+    <script>
+        const { createApp } = Vue;
+
+        createApp({
+            data() {
+                return {
+                    words: [],
+                    stats: {},
+                    rawEvents: [],
+                    search: '',
+                    selectedWord: null,
+                    streamOptions: [],
+                    filter: getFilterState(),
+                    apiMeta: {},
+                    autoRefreshTimer: null,
+                    loading: false
+                };
+            },
+
+            computed: {
+                sidebar() {
+                    return sidebarHtml('words');
+                },
+
+                filteredWords() {
+                    const q = String(this.search || '').toLowerCase();
+                    return this.words
+                        .filter(w => String(w.w || '').toLowerCase().includes(q))
+                        .slice(0, 150);
+                },
+
+                currentLabel() {
+                    const selectedStream =
+                        this.filter.mode === 'stream'
+                            ? this.streamOptions.find(s => String(s.id) === String(this.filter.stream_id))
+                            : null;
+
+                    return getReadableFilterLabel(this.filter, this.apiMeta, selectedStream);
+                },
+
+                isAutoMode() {
+                    return this.filter.mode === 'live' || this.filter.mode === 'offstream_live';
+                }
+            },
+
+            methods: {
+                isKickEmoteWord(word) {
+    // Sadece 'emoji' yazanları değil, rakamdan sonra harf gelenleri de yakalar
+    return /emote\d+[a-zA-Z]*/i.test(String(word || '').trim());
+},
+
+                getKickEmoteId(word) {
+    // Sadece sayı kısmını (ID) çekip alır
+    const match = String(word || '').trim().match(/emote(\d+)/i);
+    return match ? match[1] : null;
+},
+
+                getKickEmoteUrl(word) {
+                    const id = this.getKickEmoteId(word);
+                    return id ? `https://files.kick.com/emotes/${id}/fullsize` : '';
+                },
+
+                getRemainingTextAfterEmote(word) {
+    // Hem emote kodunu hem de arkasındaki bitişik metni (rraeneega gibi) temizler
+    return String(word || '')
+        .replace(/emote\d+[a-zA-Z]*/ig, '')
+        .trim();
+},
+
+                handleEmoteImageError(event) {
+                    const el = event?.target;
+                    if (!el) return;
+                    el.style.display = 'none';
+                },
+
+                formatStreamLabel(stream) {
+                    if (!stream) return 'Yayın seç';
+
+                    if (stream.display_label) return stream.display_label;
+
+                    if (stream.label_date) {
+                        const suffix = stream.session_type === 'offstream' ? 'offstream' : 'yayını';
+                        return `${formatHumanDate(stream.label_date)} ${suffix}`;
+                    }
+
+                    const date = stream.started_at
+                        ? new Date(stream.started_at).toLocaleDateString('tr-TR')
+                        : '-';
+
+                    const started = stream.started_at
+                        ? new Date(stream.started_at).toLocaleTimeString('tr-TR', {
+                            hour: '2-digit',
+                            minute: '2-digit'
+                        })
+                        : '--:--';
+
+                    return `${date} · ${started}`;
+                },
+
+                syncFilterState() {
+                    this.filter = setFilterState(this.filter);
+                },
+
+                buildWordsFromEvents(events) {
+                    const wordMap = {};
+                    const userWordMap = {};
+
+                    for (const ev of events || []) {
+                        if (ev.event_type !== 'chat') continue;
+
+                        const username = ev.username || 'Unknown';
+                        const msg = String(ev.message || '');
+                        const tokens = msg.split(/\s+/).filter(Boolean);
+
+                        for (const token of tokens) {
+                            const cleaned = normalizeWord(token);
+                            if (cleaned.length < 2) continue;
+
+                            if (!wordMap[cleaned]) {
+                                wordMap[cleaned] = {
+                                    w: cleaned,
+                                    c: 0,
+                                    unique_users: 0,
+                                    top: []
+                                };
+                            }
+
+                            wordMap[cleaned].c += 1;
+
+                            if (!userWordMap[cleaned]) userWordMap[cleaned] = {};
+                            userWordMap[cleaned][username] = (userWordMap[cleaned][username] || 0) + 1;
+                        }
+                    }
+
+                    const result = Object.values(wordMap).map(word => {
+                        const users = userWordMap[word.w] || {};
+                        const top = Object.entries(users)
+                            .map(([name, count]) => ({ name, count }))
+                            .sort((a, b) => b.count - a.count)
+                            .slice(0, 10);
+
+                        return {
+                            ...word,
+                            unique_users: Object.keys(users).length,
+                            top
+                        };
+                    });
+
+                    result.sort((a, b) => b.c - a.c);
+                    return result;
+                },
+
+                normalizeWords(apiWords, fallbackEvents) {
+                    if (Array.isArray(apiWords) && apiWords.length > 0) {
+                        return apiWords.map(item => ({
+                            w: item.w || item.word || '',
+                            c: Number(item.c ?? item.count ?? 0),
+                            unique_users: Number(item.unique_users ?? (Array.isArray(item.top) ? item.top.length : 0) ?? 0),
+                            top: Array.isArray(item.top) ? item.top : []
+                        }));
+                    }
+
+                    return this.buildWordsFromEvents(fallbackEvents);
+                },
+
+                getWordRank(word) {
+                    return this.words.findIndex(x => x.w === word.w) + 1;
+                },
+
+                getWordUsers(word) {
+                    if (!word || !word.w) return [];
+
+                    if (Array.isArray(word.top) && word.top.length) {
+                        return word.top.map(entry => {
+                            if (Array.isArray(entry)) {
+                                return {
+                                    name: entry[0] || 'Unknown',
+                                    count: entry[1] || 0
+                                };
+                            }
+
+                            return {
+                                name: entry.name || entry.n || entry.u || entry.username || 'Unknown',
+                                count: entry.count ?? entry.c ?? 0
+                            };
+                        }).slice(0, 10);
+                    }
+
+                    const target = String(word.w).toLowerCase();
+                    const userMap = {};
+
+                    for (const ev of this.rawEvents || []) {
+                        if (ev.event_type !== 'chat') continue;
+
+                        const username = ev.username || 'Unknown';
+                        const msg = String(ev.message || '');
+                        const tokens = msg.split(/\s+/).filter(Boolean);
+
+                        for (const token of tokens) {
+                            const cleaned = normalizeWord(token);
+                            if (cleaned !== target) continue;
+                            userMap[username] = (userMap[username] || 0) + 1;
+                        }
+                    }
+
+                    return Object.entries(userMap)
+                        .map(([name, count]) => ({ name, count }))
+                        .sort((a, b) => b.count - a.count)
+                        .slice(0, 10);
+                },
+
+                async fetchStreamsForSelect() {
+                    try {
+                        this.streamOptions = await fetchStreams(100);
+
+                        if (this.filter.mode === 'stream' && !this.filter.stream_id && this.streamOptions.length > 0) {
+                            this.filter.stream_id = String(this.streamOptions[0].id);
+                            this.syncFilterState();
+                        }
+                    } catch (err) {
+                        console.error('stream listesi alınamadı', err);
+                    }
+                },
+
+                async fetchPageData() {
+                    this.loading = true;
+
+                    try {
+                        this.syncFilterState();
+
+                        const result = await loadDashboardData(this.filter);
+
+                        this.stats = result.transformed.stats || {};
+                        this.rawEvents = result.transformed.rawEvents || [];
+                        this.words = this.normalizeWords(result.transformed.words || [], this.rawEvents);
+                        this.apiMeta = result.apiData.meta || {};
+
+                        if (this.selectedWord) {
+                            const found = this.words.find(
+                                w => String(w.w || '').toLowerCase() === String(this.selectedWord.w || '').toLowerCase()
+                            );
+                            this.selectedWord = found || null;
+                        }
+                    } catch (err) {
+                        console.error(err);
+                        alert('Kelime verileri alınamadı.');
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                async handleModeChange() {
+                    if (this.filter.mode === 'stream') {
+                        if (!this.filter.stream_id && this.streamOptions.length > 0) {
+                            this.filter.stream_id = String(this.streamOptions[0].id);
+                        }
+                    }
+
+                    if (this.filter.mode !== 'stream') {
+                        this.filter.stream_id = this.filter.stream_id || '';
+                    }
+
+                    await this.handleFilterChange();
+                },
+
+                async handleFilterChange() {
+                    if (this.filter.mode === 'stream' && !this.filter.stream_id && this.streamOptions.length > 0) {
+                        this.filter.stream_id = String(this.streamOptions[0].id);
+                    }
+
+                    this.syncFilterState();
+                    await this.fetchPageData();
+                    this.setupAutoRefresh();
+                },
+
+                setupAutoRefresh() {
+                    if (this.autoRefreshTimer) {
+                        clearInterval(this.autoRefreshTimer);
+                        this.autoRefreshTimer = null;
+                    }
+
+                    if (this.isAutoMode) {
+                        this.autoRefreshTimer = setInterval(() => {
+                            this.fetchPageData();
+                        }, 5000);
+                    }
+                }
+            },
+
+            async mounted() {
+                await this.fetchStreamsForSelect();
+                await this.fetchPageData();
+                this.setupAutoRefresh();
+
+                window.addEventListener('storage', async (event) => {
+                    if (event.key === 'rr_shared_filter_state_v1') {
+                        this.filter = getFilterState();
+                        await this.fetchStreamsForSelect();
+                        await this.fetchPageData();
+                        this.setupAutoRefresh();
+                    }
+                });
+            },
+
+            beforeUnmount() {
+                if (this.autoRefreshTimer) {
+                    clearInterval(this.autoRefreshTimer);
+                }
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>

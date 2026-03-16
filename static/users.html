@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RRaenee Users</title>
+
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/assets/css/style.css">
+</head>
+<body>
+    <div id="app" class="flex h-screen overflow-hidden">
+        <div v-html="sidebar"></div>
+
+        <main class="flex-1 flex flex-col overflow-hidden relative">
+            <header class="p-6 border-b border-white/5 bg-[#05070a] flex flex-col gap-4">
+                <div class="flex justify-between items-center gap-4 flex-wrap">
+                    <h2 class="text-xl font-black text-pink-500 uppercase italic">CHAT SIRALAMASI</h2>
+
+                    <div class="flex items-center gap-3 flex-wrap">
+                        <input
+                            v-model="search"
+                            type="text"
+                            placeholder="Kullanıcı ara..."
+                            class="bg-[#0f1218] border border-white/10 rounded-2xl px-6 py-3 w-72 outline-none text-white"
+                        >
+
+                        <button
+                            v-if="isAutoMode"
+                            @click="fetchPageData"
+                            class="bg-pink-600 hover:bg-pink-500 transition text-white font-black rounded-2xl px-5 py-3 text-sm"
+                        >
+                            Yenile
+                        </button>
+                    </div>
+                </div>
+
+                <div
+                    v-if="apiMeta.warning"
+                    class="rounded-2xl border border-yellow-500/20 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-300 font-bold"
+                >
+                    <i class="fa fa-triangle-exclamation mr-2"></i>
+                    {{ apiMeta.warning }}
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
+                    <div>
+                        <label class="block text-[10px] uppercase font-black opacity-50 mb-2">Veri Modu</label>
+                        <select v-model="filter.mode" @change="handleModeChange" class="w-full bg-[#0b0f14] text-white border border-white/10 rounded-2xl px-4 py-3 text-sm font-black outline-none appearance-none">
+                            <option value="live">Canlı Yayın</option>
+                            <option value="offstream_live">Canlı Offstream</option>
+                            <option value="stream">Yayın Seç</option>
+                            <option value="day">Gün Seç</option>
+                            <option value="offstream_day">Offstream Gün</option>
+                            <option value="week">Son 7 Gün</option>
+                            <option value="month">Ay Seç</option>
+                            <option value="all">Tüm Zamanlar</option>
+                        </select>
+                    </div>
+
+                    <div v-if="filter.mode === 'stream'">
+                        <label class="block text-[10px] uppercase font-black opacity-50 mb-2">Yayın</label>
+                        <select v-model="filter.stream_id" @change="handleFilterChange" class="w-full bg-[#0b0f14] text-white border border-white/10 rounded-2xl px-4 py-3 text-sm font-black outline-none appearance-none">
+                            <option value="">Yayın seç</option>
+                            <option v-for="s in streamOptions" :key="String(s.id)" :value="String(s.id)">
+                                {{ formatStreamLabel(s) }}
+                            </option>
+                        </select>
+                    </div>
+
+                    <div v-if="filter.mode === 'day' || filter.mode === 'offstream_day'">
+                        <label class="block text-[10px] uppercase font-black opacity-50 mb-2">
+                            {{ filter.mode === 'offstream_day' ? 'Offstream Gün' : 'Gün' }}
+                        </label>
+                        <input
+                            v-model="filter.date"
+                            @change="handleFilterChange"
+                            type="date"
+                            class="w-full bg-[#0b0f14] text-white border border-white/10 rounded-2xl px-4 py-3 text-sm font-black outline-none"
+                        >
+                    </div>
+
+                    <div v-if="filter.mode === 'month'">
+                        <label class="block text-[10px] uppercase font-black opacity-50 mb-2">Ay</label>
+                        <input
+                            v-model="filter.month"
+                            @change="handleFilterChange"
+                            type="month"
+                            class="w-full bg-[#0b0f14] text-white border border-white/10 rounded-2xl px-4 py-3 text-sm font-black outline-none"
+                        >
+                    </div>
+
+                    <div class="xl:col-span-2">
+                        <label class="block text-[10px] uppercase font-black opacity-50 mb-2">Aktif Veri</label>
+                        <div class="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-sm font-black min-h-[50px] flex items-center">
+                            {{ currentLabel }}
+                        </div>
+                    </div>
+                </div>
+            </header>
+
+            <section class="page-section flex-1 p-8 scroll-flat">
+                <div class="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-5 gap-4 mb-8">
+                    <div class="stat-card">
+                        <p class="opacity-50 text-xs font-bold mb-1 uppercase tracking-widest">Toplam Kullanıcı</p>
+                        <h3 class="text-3xl font-black text-pink-400">{{ users.length }}</h3>
+                    </div>
+
+                    <div class="stat-card">
+                        <p class="opacity-50 text-xs font-bold mb-1 uppercase tracking-widest">Toplam Mesaj</p>
+                        <h3 class="text-3xl font-black text-pink-400">{{ stats.total_msgs || 0 }}</h3>
+                    </div>
+
+                    <div class="stat-card">
+                        <p class="opacity-50 text-xs font-bold mb-1 uppercase tracking-widest">Ortalama Mesaj</p>
+                        <h3 class="text-3xl font-black text-blue-400">{{ averageMessages }}</h3>
+                    </div>
+
+                    <div class="stat-card">
+                        <p class="opacity-50 text-xs font-bold mb-1 uppercase tracking-widest">Arama Sonucu</p>
+                        <h3 class="text-3xl font-black text-green-400">{{ filteredUsers.length }}</h3>
+                    </div>
+
+                    <div class="stat-card">
+                        <p class="opacity-50 text-xs font-bold mb-1 uppercase tracking-widest">Canlı Otomatik</p>
+                        <h3 class="text-3xl font-black" :class="isAutoMode ? 'text-green-400' : 'text-red-400'">
+                            {{ isAutoMode ? 'AÇIK' : 'KAPALI' }}
+                        </h3>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                    <div
+                        v-for="u in filteredUsers"
+                        :key="u.n"
+                        @click="selectedUser = u"
+                        class="glass p-6 rounded-[32px] hover:border-pink-600 transition cursor-pointer relative group"
+                    >
+                        <div class="flex justify-between items-start mb-6 gap-4">
+                            <h5 class="font-black text-2xl uppercase italic break-all pr-2">{{ u.n }}</h5>
+                            <span class="text-5xl font-black text-white/5 group-hover:text-pink-600 whitespace-nowrap">#{{ u.rank }}</span>
+                        </div>
+
+                        <div class="grid grid-cols-3 gap-2 text-center text-[10px] font-black uppercase tracking-tighter">
+                            <div class="bg-white/5 p-3 rounded-2xl border border-white/5">
+                                <p class="text-pink-400 text-xl">{{ u.mc || 0 }}</p>Mesaj
+                            </div>
+                            <div class="bg-white/5 p-3 rounded-2xl border border-white/5">
+                                <p class="text-blue-400 text-xl">{{ u.wc || 0 }}</p>Kelime
+                            </div>
+                            <div class="bg-white/5 p-3 rounded-2xl border border-white/5">
+                                <p class="text-green-400 text-xl">{{ u.ec || 0 }}</p>Emoji
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <transition name="modal">
+            <div v-if="selectedUser" class="fixed inset-0 flex justify-end z-[1000]">
+                <div @click="selectedUser = null" class="absolute inset-0 bg-black/80 backdrop-blur-md"></div>
+
+                <div class="w-full max-w-2xl glass h-full shadow-2xl flex flex-col z-10 border-l border-white/10 text-white">
+                    <div class="p-10 border-b border-white/5">
+                        <div class="flex justify-between items-start gap-4">
+                            <div class="flex-1 min-w-0">
+                                <span class="text-pink-500 font-black text-xs uppercase italic">İzleyici Detayı</span>
+                                <h2 class="text-4xl md:text-6xl font-black mt-2 italic uppercase tracking-tighter break-all">{{ selectedUser.n }}</h2>
+                            </div>
+
+                            <button @click="selectedUser = null" class="text-5xl hover:text-red-500 transition leading-none ml-4">&times;</button>
+                        </div>
+
+                        <div class="grid grid-cols-3 gap-4 mt-8 text-center text-[10px] font-black uppercase tracking-tighter">
+                            <div class="bg-white/5 p-4 rounded-3xl border border-white/5">
+                                <p class="text-pink-400 text-2xl">{{ selectedUser.mc || 0 }}</p>Mesaj
+                            </div>
+                            <div class="bg-white/5 p-4 rounded-3xl border border-white/5">
+                                <p class="text-blue-400 text-2xl">{{ selectedUser.wc || 0 }}</p>Kelime
+                            </div>
+                            <div class="bg-white/5 p-4 rounded-3xl border border-white/5">
+                                <p class="text-green-400 text-2xl">{{ selectedUser.ec || 0 }}</p>Emoji
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-8">
+                            <div class="bg-white/5 p-4 rounded-3xl border border-white/5">
+                                <p class="text-[10px] font-black text-pink-500 uppercase mb-3">En Çok Kullandığı Kelimeler</p>
+                                <div
+                                    v-for="(w, i) in (selectedUser.tw || [])"
+                                    :key="i"
+                                    class="flex justify-between text-xs py-1.5 opacity-80 border-b border-white/5 last:border-0 italic gap-3"
+                                >
+                                    <span class="min-w-0 break-all">"{{ Array.isArray(w) ? w[0] : (w?.word || '') }}"</span>
+                                    <b>{{ Array.isArray(w) ? w[1] : (w?.count || 0) }}</b>
+                                </div>
+                                <div v-if="!(selectedUser.tw || []).length" class="text-xs opacity-40">Veri yok</div>
+                            </div>
+
+                            <div class="bg-white/5 p-4 rounded-3xl border border-white/5">
+                                <p class="text-[10px] font-black text-green-500 uppercase mb-3">Favori Emojileri</p>
+
+                                <div
+                                    v-for="(e, i) in normalizedTopEmotes(selectedUser.te || [])"
+                                    :key="i"
+                                    class="flex justify-between items-center text-xs py-1 opacity-80 border-b border-white/5 last:border-0 gap-3"
+                                >
+                                    <span class="flex items-center gap-2 min-w-0">
+                                        <img
+                                            v-if="e.id"
+                                            :src="'https://files.kick.com/emotes/' + e.id + '/fullsize'"
+                                            :alt="e.n"
+                                            class="h-6 w-6 object-contain shrink-0"
+                                            loading="lazy"
+                                            @error="handleEmoteImageError"
+                                        >
+                                        <span class="truncate">
+                                            {{ getRemainingTextAfterEmote(e.n) || e.n }}
+                                        </span>
+                                    </span>
+                                    <b>{{ e.c }}</b>
+                                </div>
+
+                                <div v-if="!(selectedUser.te || []).length" class="text-xs opacity-40">Veri yok</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="flex-1 overflow-y-auto p-10 bg-black/30 space-y-4 scroll-flat">
+                        <p class="text-[10px] font-black opacity-30 uppercase italic">Son Mesajları</p>
+
+                        <div
+                            v-for="(log, i) in (selectedUser.logs || [])"
+                            :key="i"
+                            class="p-5 rounded-[24px] bg-white/5 border-l-4 border-pink-500 text-sm"
+                        >
+                            <span class="opacity-30 text-[10px] block mb-2 font-mono">{{ log.t }}</span>
+                            <p v-html="parseMessage(log.m)"></p>
+                        </div>
+
+                        <div v-if="!(selectedUser.logs || []).length" class="opacity-40 text-sm">
+                            Son mesaj kaydı bulunamadı.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </transition>
+    </div>
+
+    <script src="/assets/js/common.js"></script>
+    <script>
+        const { createApp } = Vue;
+
+        createApp({
+            data() {
+                return {
+                    users: [],
+                    stats: {},
+                    search: '',
+                    selectedUser: null,
+                    streamOptions: [],
+                    filter: getFilterState(),
+                    apiMeta: {},
+                    autoRefreshTimer: null,
+                    loading: false
+                };
+            },
+
+            computed: {
+                sidebar() {
+                    return sidebarHtml('users');
+                },
+
+                filteredUsers() {
+                    return this.users
+                        .filter(u => String(u.n || '').toLowerCase().includes(String(this.search || '').toLowerCase()))
+                        .slice(0, 150);
+                },
+
+                currentLabel() {
+                    const selectedStream =
+                        this.filter.mode === 'stream'
+                            ? this.streamOptions.find(s => String(s.id) === String(this.filter.stream_id))
+                            : null;
+
+                    return getReadableFilterLabel(this.filter, this.apiMeta, selectedStream);
+                },
+
+                averageMessages() {
+                    if (!this.users.length) return 0;
+                    return Math.round((this.stats.total_msgs || 0) / this.users.length);
+                },
+
+                isAutoMode() {
+                    return this.filter.mode === 'live' || this.filter.mode === 'offstream_live';
+                }
+            },
+
+            methods: {
+                parseMessage,
+
+                isKickEmoteWord(word) {
+                    return /emote\d+[a-zA-Z]*/i.test(String(word || '').trim());
+                },
+
+                getKickEmoteId(word) {
+                    const match = String(word || '').trim().match(/emote(\d+)/i);
+                    return match ? match[1] : null;
+                },
+
+                getRemainingTextAfterEmote(word) {
+                    return String(word || '')
+                        .replace(/emote\d+[a-zA-Z]*/ig, '')
+                        .trim();
+                },
+
+                handleEmoteImageError(event) {
+                    const el = event?.target;
+                    if (!el) return;
+                    el.style.display = 'none';
+                },
+
+                normalizedTopEmotes(items) {
+                    return (items || []).map(item => {
+                        if (Array.isArray(item)) {
+                            const rawName = item[0] || '';
+                            return {
+                                n: rawName,
+                                c: Number(item[1] || 0),
+                                id: this.getKickEmoteId(rawName)
+                            };
+                        }
+
+                        const rawName = item?.n || item?.name || '';
+                        return {
+                            n: rawName,
+                            c: Number(item?.c ?? item?.count ?? 0),
+                            id: item?.id || this.getKickEmoteId(rawName)
+                        };
+                    });
+                },
+
+                formatStreamLabel(stream) {
+                    if (!stream) return 'Yayın seç';
+
+                    if (stream.display_label) return stream.display_label;
+
+                    if (stream.label_date) {
+                        const suffix = stream.session_type === 'offstream' ? 'offstream' : 'yayını';
+                        return `${formatHumanDate(stream.label_date)} ${suffix}`;
+                    }
+
+                    const date = stream.started_at
+                        ? new Date(stream.started_at).toLocaleDateString('tr-TR')
+                        : '-';
+
+                    const started = stream.started_at
+                        ? new Date(stream.started_at).toLocaleTimeString('tr-TR', {
+                            hour: '2-digit',
+                            minute: '2-digit'
+                        })
+                        : '--:--';
+
+                    return `${date} · ${started}`;
+                },
+
+                syncFilterState() {
+                    this.filter = setFilterState(this.filter);
+                },
+
+                async fetchStreamsForSelect() {
+                    try {
+                        this.streamOptions = await fetchStreams(100);
+
+                        if (this.filter.mode === 'stream' && !this.filter.stream_id && this.streamOptions.length > 0) {
+                            this.filter.stream_id = String(this.streamOptions[0].id);
+                            this.syncFilterState();
+                        }
+                    } catch (err) {
+                        console.error('stream listesi alınamadı', err);
+                    }
+                },
+
+                async fetchPageData() {
+                    this.loading = true;
+
+                    try {
+                        this.syncFilterState();
+
+                        const result = await loadDashboardData(this.filter);
+                        this.users = result.transformed.users || [];
+                        this.stats = result.transformed.stats || {};
+                        this.apiMeta = result.apiData.meta || {};
+
+                        if (this.selectedUser) {
+                            const found = this.users.find(
+                                u => String(u.n || '').toLowerCase() === String(this.selectedUser.n || '').toLowerCase()
+                            );
+                            this.selectedUser = found || null;
+                        }
+                    } catch (err) {
+                        console.error(err);
+                        alert('Kullanıcı verileri alınamadı.');
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                async handleModeChange() {
+                    if (this.filter.mode === 'stream') {
+                        if (!this.filter.stream_id && this.streamOptions.length > 0) {
+                            this.filter.stream_id = String(this.streamOptions[0].id);
+                        }
+                    }
+
+                    if (this.filter.mode !== 'stream') {
+                        this.filter.stream_id = this.filter.stream_id || '';
+                    }
+
+                    await this.handleFilterChange();
+                },
+
+                async handleFilterChange() {
+                    if (this.filter.mode === 'stream' && !this.filter.stream_id && this.streamOptions.length > 0) {
+                        this.filter.stream_id = String(this.streamOptions[0].id);
+                    }
+
+                    this.syncFilterState();
+                    await this.fetchPageData();
+                    this.setupAutoRefresh();
+                },
+
+                setupAutoRefresh() {
+                    if (this.autoRefreshTimer) {
+                        clearInterval(this.autoRefreshTimer);
+                        this.autoRefreshTimer = null;
+                    }
+
+                    if (this.isAutoMode) {
+                        this.autoRefreshTimer = setInterval(() => {
+                            this.fetchPageData();
+                        }, 5000);
+                    }
+                }
+            },
+
+            async mounted() {
+                await this.fetchStreamsForSelect();
+                await this.fetchPageData();
+                this.setupAutoRefresh();
+
+                window.addEventListener('storage', async (event) => {
+                    if (event.key === 'rr_shared_filter_state_v1') {
+                        this.filter = getFilterState();
+                        await this.fetchStreamsForSelect();
+                        await this.fetchPageData();
+                        this.setupAutoRefresh();
+                    }
+                });
+            },
+
+            beforeUnmount() {
+                if (this.autoRefreshTimer) {
+                    clearInterval(this.autoRefreshTimer);
+                }
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>

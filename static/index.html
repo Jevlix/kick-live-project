@@ -2,477 +2,335 @@
 <html lang="tr">
 <head>
     <meta charset="UTF-8">
-    <title>RRaenee Analytics & Arena v3.0</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RRaenee Dashboard</title>
+
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
-
-        body {
-            background: #05070a;
-            color: #f1f5f9;
-            font-family: 'Inter', sans-serif;
-            overflow: hidden;
-        }
-
-        .glass {
-            background: #0f1218;
-            border: 1px solid rgba(255,255,255,0.05);
-        }
-
-        .active-tab {
-            background: #e91e63 !important;
-            color: white !important;
-        }
-
-        .tooltip-box {
-            display: none;
-            position: absolute;
-            top: 85%;
-            left: 50%;
-            transform: translateX(-50%);
-            min-width: 250px;
-            background: #1a1d24;
-            border: 2px solid #e91e63;
-            padding: 15px;
-            border-radius: 18px;
-            z-index: 9999;
-            box-shadow: 0 25px 50px rgba(0,0,0,0.9);
-            pointer-events: none;
-        }
-
-        .group:hover .tooltip-box {
-            display: block;
-        }
-
-        .group:hover {
-            z-index: 50 !important;
-            position: relative;
-        }
-
-        .full-name {
-            white-space: normal;
-            word-break: break-word;
-            overflow: visible;
-        }
-
-        .timer-bar {
-            transition: width 1s linear;
-            background: #e91e63;
-            height: 12px;
-            border-radius: 6px;
-            box-shadow: 0 0 20px #e91e63;
-        }
-
-        .countdown-text {
-            font-size: 15rem;
-            font-weight: 900;
-            color: #e91e63;
-            text-shadow: 0 0 60px #e91e63;
-        }
-
-        .my-selection {
-            border: 4px solid #e91e63 !important;
-            background: rgba(233, 30, 99, 0.1);
-        }
-
-        .correct-answer {
-            border: 4px solid #22c55e !important;
-            background: #14532d !important;
-            transform: scale(1.02);
-        }
-
-        .wrong-answer {
-            border: 4px solid #ef4444 !important;
-            opacity: 0.5;
-        }
-
-        .scroll-flat::-webkit-scrollbar {
-            height: 4px;
-            width: 4px;
-        }
-
-        .scroll-flat::-webkit-scrollbar-thumb {
-            background: #e91e63;
-            border-radius: 10px;
-        }
-
-        .chat-emote {
-            height: 28px;
-            display: inline-block;
-            vertical-align: middle;
-        }
-
-        section {
-            overflow-y: auto;
-            overflow-x: visible !important;
-        }
-    </style>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/assets/css/style.css">
 </head>
 <body>
     <div id="app" class="flex h-screen overflow-hidden">
-        
-        <aside class="w-64 glass flex flex-col p-6 space-y-6 shadow-2xl z-20">
-            <div class="flex items-center gap-3">
-                <div class="w-10 h-10 bg-pink-600 rounded-lg flex items-center justify-center font-black text-xl text-white">RR</div>
-                <h1 class="text-2xl font-black text-pink-500 tracking-tighter uppercase">RRaenee</h1>
-            </div>
-
-            <nav class="flex flex-col space-y-1">
-                <button @click="setTab('genel')" :class="{ 'active-tab': tab == 'genel' }" class="p-3 rounded-xl text-left hover:bg-white/5 transition">
-                    <i class="fa fa-chart-pie mr-3"></i> Chat Özeti
-                </button>
-
-                <button @click="setTab('liveChat')" :class="{ 'active-tab': tab == 'liveChat' }" class="p-3 rounded-xl text-left border border-pink-500/30 text-pink-300 font-bold hover:bg-pink-500/10 transition">
-                    <i class="fa fa-comments mr-3"></i> CANLI CHAT
-                </button>
-                
-                <div class="py-2 opacity-20 text-[10px] font-bold uppercase tracking-widest px-3">Arena Oyunları</div>
-
-                <button @click="setTab('game')" :class="{ 'active-tab': tab == 'game' }" class="p-4 rounded-xl text-left bg-pink-600 text-white font-black shadow-lg mb-1">
-                    <i class="fa fa-trophy mr-3"></i> GAGARA ŞAMPİYONASI OYUNU
-                </button>
-
-                <button @click="setTab('kelimeTahmin')" :class="{ 'active-tab': tab == 'kelimeTahmin' }" class="p-3 rounded-xl text-left hover:bg-green-900/30 transition text-green-400 font-bold mb-1">
-                    <i class="fa fa-font mr-3"></i> KELİME TAHMİN OYUNU
-                </button>
-
-                <button @click="setTab('emojiTahmin')" :class="{ 'active-tab': tab == 'emojiTahmin' }" class="p-3 rounded-xl text-left hover:bg-yellow-900/30 transition text-yellow-400 font-bold mb-1">
-                    <i class="fa fa-smile mr-3"></i> EMOJİ TAHMİN OYUNU
-                </button>
-                
-                <div class="py-2 opacity-20 text-[10px] font-bold uppercase tracking-widest px-3">Analiz</div>
-
-                <button @click="setTab('users')" :class="{ 'active-tab': tab == 'users' }" class="p-3 rounded-xl text-left hover:bg-white/5 transition">
-                    <i class="fa fa-users mr-3"></i> Chat Sıralaması
-                </button>
-
-                <button @click="setTab('words')" :class="{ 'active-tab': tab == 'words' }" class="p-3 rounded-xl text-left hover:bg-white/5 transition">
-                    <i class="fa fa-font mr-3"></i> Kelime Sıralaması
-                </button>
-
-                <button @click="setTab('emojis')" :class="{ 'active-tab': tab == 'emojis' }" class="p-3 rounded-xl text-left hover:bg-yellow-900/30 transition text-yellow-400 font-bold">
-                    <i class="fa fa-face-smile mr-3"></i> Emoji Sıralaması
-                </button>
-
-                <button @click="setTab('spam')" :class="{ 'active-tab': tab == 'spam' }" class="p-3 rounded-xl text-left hover:bg-white/5 transition text-red-500 font-bold">
-                    <i class="fa fa-ghost mr-3"></i> Spam Raporu
-                </button>
-            </nav>
-        </aside>
+        <div v-html="sidebar"></div>
 
         <main class="flex-1 flex flex-col overflow-hidden relative">
-            <header class="p-6 border-b border-white/5 flex justify-between items-center bg-[#05070a]">
-                <h2 class="text-xl font-black text-pink-500 uppercase italic">{{ getHeaderTitle() }}</h2>
-                <div class="flex items-center gap-4">
-                    <div :class="['glass px-4 py-2 rounded-full text-[10px] font-black tracking-widest uppercase', isConnected ? 'text-green-400 border-green-500/30' : 'text-red-400 border-red-500/30']">
-                        Chat: {{ isConnected ? 'Aktif' : 'Bağlanıyor' }}
+            <header class="p-6 border-b border-white/5 flex flex-col gap-4 bg-[#05070a]">
+                <div class="flex justify-between items-center gap-4 flex-wrap">
+                    <h2 class="text-xl font-black text-pink-500 uppercase italic">CHAT ÖZETİ</h2>
+
+                    <div class="flex items-center gap-2 text-xs font-black uppercase tracking-wider">
+                        <span class="w-2.5 h-2.5 rounded-full" :class="isConnected ? 'bg-green-400' : 'bg-red-500'"></span>
+                        <span :class="isConnected ? 'text-green-400' : 'text-red-400'">
+                            {{ isConnected ? 'Canlı Chat Bağlı' : 'Canlı Chat Kopuk' }}
+                        </span>
                     </div>
-                    <input
-                        v-if="!isGameTab"
-                        v-model="search"
-                        type="text"
-                        placeholder="Ara..."
-                        class="bg-[#0f1218] border border-white/5 rounded-2xl px-6 py-2 w-64 outline-none text-white focus:ring-2 focus:ring-pink-600"
-                    >
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
+                    <div>
+                        <label class="block text-[10px] uppercase font-black opacity-50 mb-2">Veri Modu</label>
+                        <select v-model="filterMode" @change="handleModeChange" class="w-full bg-[#0b0f14] text-white border border-white/10 rounded-2xl px-4 py-3 text-sm font-black outline-none appearance-none">
+                            <option value="live">Canlı Yayın</option>
+                            <option value="offstream_live">Canlı Offstream</option>
+                            <option value="stream">Yayın Seç</option>
+                            <option value="day">Gün Seç</option>
+                            <option value="offstream_day">Offstream Gün Seç</option>
+                            <option value="week">Son 7 Gün</option>
+                            <option value="month">Ay Seç</option>
+                            <option value="all">Tüm Zamanlar</option>
+                        </select>
+                    </div>
+
+                    <div v-if="filterMode === 'stream'">
+                        <label class="block text-[10px] uppercase font-black opacity-50 mb-2">Yayın</label>
+                        <select v-model="selectedStreamId" @change="fetchDashboardData" class="w-full bg-[#0b0f14] text-white border border-white/10 rounded-2xl px-4 py-3 text-sm font-black outline-none appearance-none">
+                            <option value="">Yayın seç</option>
+                            <option v-for="s in streamOptions" :key="s.id" :value="String(s.id)">
+                                {{ formatStreamLabel(s) }}
+                            </option>
+                        </select>
+                    </div>
+
+                    <div v-if="filterMode === 'day' || filterMode === 'offstream_day'">
+                        <label class="block text-[10px] uppercase font-black opacity-50 mb-2">
+                            {{ filterMode === 'offstream_day' ? 'Offstream Günü' : 'Gün' }}
+                        </label>
+                        <input
+                            v-model="selectedDate"
+                            @change="fetchDashboardData"
+                            type="date"
+                            class="w-full bg-[#0b0f14] text-white border border-white/10 rounded-2xl px-4 py-3 text-sm font-black outline-none appearance-none"
+                        >
+                    </div>
+
+                    <div v-if="filterMode === 'month'">
+                        <label class="block text-[10px] uppercase font-black opacity-50 mb-2">Ay</label>
+                        <input
+                            v-model="selectedMonth"
+                            @change="fetchDashboardData"
+                            type="month"
+                            class="w-full bg-[#0b0f14] text-white border border-white/10 rounded-2xl px-4 py-3 text-sm font-black outline-none appearance-none"
+                        >
+                    </div>
+
+                    <div class="xl:col-span-2">
+                        <label class="block text-[10px] uppercase font-black opacity-50 mb-2">Aktif Veri</label>
+                        <div class="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-sm font-black min-h-[50px] flex items-center">
+                            {{ currentLabel }}
+                        </div>
+                    </div>
                 </div>
             </header>
 
-            <section class="flex-1 overflow-y-auto p-8 scroll-flat">
+            <section class="page-section flex-1 p-8 scroll-flat space-y-10 overflow-y-auto">
+                <div
+                    v-if="apiMeta?.warning"
+                    class="bg-red-500/10 border border-red-500/20 rounded-2xl px-4 py-3 text-red-300 font-black text-sm"
+                >
+                    {{ apiMeta.warning }}
+                </div>
 
-                <div v-if="tab == 'liveChat'" class="h-full flex flex-col glass rounded-[32px] overflow-hidden">
-                    <div class="p-4 border-b border-white/5 bg-white/5 flex justify-between items-center italic">
-                        <span class="text-xs font-black uppercase opacity-50">Canlı RR Chat Akışı</span>
+                <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+                    <div v-for="stat in mainStats" :key="stat.label" class="stat-card">
+                        <p class="opacity-50 text-xs font-bold mb-1 uppercase tracking-widest">{{ stat.label }}</p>
+                        <h3 class="text-4xl font-black text-white italic">{{ stat.val }}</h3>
                     </div>
-                    <div class="flex-1 overflow-y-auto p-4 space-y-1 bg-black/20 font-medium scroll-flat">
-                        <div v-for="m in liveMessages" :key="m.id" class="text-sm">
-                            <span class="text-pink-500 font-bold">{{ m.u }}:</span>
-                            <span class="text-gray-300" v-html="parseMessage(m.m)"></span>
+                </div>
+
+                <div>
+                    <h4 class="mb-6 font-black text-xl flex items-center gap-2 italic">
+                        <div class="w-1 h-6 bg-pink-600"></div>
+                        TOP 15 CHAT KULLANICISI
+                    </h4>
+
+                    <div class="flex gap-4 overflow-x-auto pb-4 scroll-flat">
+                        <div
+                            v-for="u in users.slice(0, 15)"
+                            :key="u.n"
+                            @click="selectedUser = u"
+                            class="min-w-[240px] glass p-6 rounded-3xl flex-shrink-0 group hover:scale-105 transition cursor-pointer border border-white/10 relative overflow-hidden"
+                        >
+                            <span class="absolute -right-4 -top-4 text-7xl font-black opacity-5 group-hover:opacity-10">#{{ u.rank }}</span>
+                            <p class="font-black text-2xl mb-4 uppercase italic break-all">{{ u.n }}</p>
+
+                            <div class="flex justify-between items-end">
+                                <p class="text-4xl font-black text-pink-500">{{ u.mc || 0 }}</p>
+                                <p class="text-[10px] opacity-40 uppercase font-black">Mesaj</p>
+                            </div>
+
+                            <div class="mt-4 grid grid-cols-3 gap-2 text-center text-[10px] font-black uppercase tracking-tighter">
+                                <div class="bg-white/5 p-2 rounded-xl border border-white/5">
+                                    <p class="text-pink-400 text-lg">{{ u.mc || 0 }}</p>Mesaj
+                                </div>
+                                <div class="bg-white/5 p-2 rounded-xl border border-white/5">
+                                    <p class="text-blue-400 text-lg">{{ u.wc || 0 }}</p>Kelime
+                                </div>
+                                <div class="bg-white/5 p-2 rounded-xl border border-white/5">
+                                    <p class="text-green-400 text-lg">{{ u.ec || 0 }}</p>Emoji
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
 
-                <div v-if="isGameTab" class="max-w-5xl mx-auto h-full">
-                    <div v-if="gamePhase == 'lobby'" class="h-full flex flex-col justify-center text-center space-y-8">
-                        <h2 class="text-7xl font-black italic text-pink-500 uppercase tracking-tighter">GAGARA ARENA</h2>
-                        <div class="glass p-12 rounded-[60px] max-w-md mx-auto space-y-6 border-t-8 border-pink-600 shadow-2xl">
-                            <input
-                                v-model="playerName"
-                                type="text"
-                                placeholder="Adını Yaz..."
-                                class="w-full bg-black border-2 border-pink-500 rounded-2xl p-5 text-3xl font-black text-center text-white outline-none"
-                            >
+                <div>
+                    <h4 class="mb-6 font-black text-xl flex items-center gap-2 italic">
+                        <div class="w-1 h-6 bg-cyan-400"></div>
+                        MODERASYON ÖZETİ
+                    </h4>
 
-                            <div class="text-left bg-white/5 p-4 rounded-2xl border border-white/10 text-xs text-gray-400">
-                                <p class="font-bold text-pink-400 mb-2 uppercase">NASIL OYNANIR?</p>
-                                <p>• Quiz modunda chat <b>"1, 2, 3, 4, 5"</b> yazarak katılır.</p>
-                                <p>• Tahmin modunda chat direkt <b>rakamı</b> yazar.</p>
-                                <p>• Hızlı yazan ve doğru yaklaşan daha çok puan alır!</p>
-                            </div>
-
-                            <button
-                                @click="startTransition"
-                                class="w-full bg-pink-600 py-6 rounded-2xl text-2xl font-black hover:bg-pink-500 transition text-white uppercase disabled:opacity-40 disabled:cursor-not-allowed"
-                                :disabled="!playerName || !isConnected"
-                            >
-                                OYUNU BAŞLAT
-                            </button>
+                    <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
+                        <div class="stat-card">
+                            <p class="opacity-50 text-xs font-bold mb-1 uppercase tracking-widest">Toplam İşlem</p>
+                            <h3 class="text-3xl font-black text-cyan-400">{{ moderationSummary.total_actions || 0 }}</h3>
+                        </div>
+                        <div class="stat-card">
+                            <p class="opacity-50 text-xs font-bold mb-1 uppercase tracking-widest">Timeout</p>
+                            <h3 class="text-3xl font-black text-yellow-400">{{ moderationSummary.timeouts || 0 }}</h3>
+                        </div>
+                        <div class="stat-card">
+                            <p class="opacity-50 text-xs font-bold mb-1 uppercase tracking-widest">Ban</p>
+                            <h3 class="text-3xl font-black text-red-400">{{ moderationSummary.bans || 0 }}</h3>
+                        </div>
+                        <div class="stat-card">
+                            <p class="opacity-50 text-xs font-bold mb-1 uppercase tracking-widest">Unban</p>
+                            <h3 class="text-3xl font-black text-green-400">{{ moderationSummary.unbans || 0 }}</h3>
+                        </div>
+                        <div class="stat-card">
+                            <p class="opacity-50 text-xs font-bold mb-1 uppercase tracking-widest">Mesaj Silme</p>
+                            <h3 class="text-3xl font-black text-pink-400">{{ moderationSummary.deleted_messages || 0 }}</h3>
                         </div>
                     </div>
+                </div>
 
-                    <div v-if="gamePhase == 'countdown'" class="h-full flex flex-col justify-center text-center animate-pulse">
-                        <h1 class="countdown-text">{{ transitionTime }}</h1>
-                        <p class="text-2xl font-black text-white uppercase italic tracking-widest">Arena Hazırlanıyor...</p>
-                    </div>
-
-                    <div v-if="gamePhase == 'playing'" class="space-y-6">
-                        <div class="flex justify-between items-center glass p-6 rounded-[30px] border-l-8 border-pink-600">
-                            <span class="font-black text-pink-400 text-xl uppercase tracking-widest italic">Round {{ currentQuestionIndex + 1 }}</span>
-                            <span class="text-5xl font-black text-white italic">{{ timeLeft }} SN</span>
+                <div class="grid grid-cols-1 xl:grid-cols-3 gap-6">
+                    <div class="stat-card xl:col-span-2">
+                        <div class="flex items-center justify-between mb-6">
+                            <h4 class="font-black text-xl italic flex items-center gap-2">
+                                <div class="w-1 h-6 bg-green-400"></div>
+                                CANLI CHAT
+                            </h4>
+                            <span class="text-[10px] uppercase font-black" :class="isConnected ? 'text-green-400' : 'text-red-400'">
+                                {{ isConnected ? 'CANLI' : 'BEKLENİYOR' }}
+                            </span>
                         </div>
 
-                        <div class="text-center space-y-6 py-10">
-                            <h2 class="text-3xl font-black uppercase italic text-white tracking-tight">{{ activeQuestion.title }}</h2>
-
-                            <div v-if="activeQuestion.type == 'guess'" class="glass p-10 rounded-[40px] inline-block border-2 border-pink-500 shadow-[0_0_50px_rgba(233,30,99,0.2)]">
-                                <h3 v-if="tab != 'emojiTahmin'" class="text-7xl font-black text-white italic uppercase">
-                                    "{{ activeQuestion.target }}"
-                                </h3>
-                                <img
-                                    v-else
-                                    :src="'https://files.kick.com/emotes/' + activeQuestion.targetId + '/fullsize'"
-                                    class="h-48 w-48 mx-auto drop-shadow-2xl"
-                                >
-                            </div>
-                        </div>
-
-                        <div v-if="activeQuestion.type == 'quiz'" class="grid grid-cols-1 gap-3">
+                        <div class="space-y-3 max-h-[640px] overflow-y-auto scroll-flat pr-2">
                             <div
-                                v-for="(opt, i) in activeQuestion.options"
-                                @click="selectAnswer(i+1)"
-                                :class="{
-                                    'my-selection': mySelection == (i+1) && !showAnswers,
-                                    'correct-answer': showAnswers && (i+1) == activeQuestion.correctIndex,
-                                    'wrong-answer': showAnswers && (i+1) != activeQuestion.correctIndex && mySelection == (i+1)
-                                }"
-                                class="glass p-5 rounded-[25px] flex justify-between items-center cursor-pointer hover:bg-white/10 transition text-white"
+                                v-for="(msg, idx) in liveMessages"
+                                :key="'live-' + idx"
+                                class="p-4 rounded-[22px] bg-white/5 border border-white/5"
                             >
-                                <div class="flex items-center gap-6">
-                                    <span class="w-14 h-14 bg-pink-600 rounded-2xl flex items-center justify-center font-black text-3xl shadow-xl italic">
-                                        {{ i+1 }}
-                                    </span>
-
-                                    <span v-if="!activeQuestion.isEmoji" class="text-2xl font-bold uppercase italic full-name">
-                                        {{ opt.n || opt.w }}
-                                    </span>
-
-                                    <img
-                                        v-else
-                                        :src="'https://files.kick.com/emotes/' + opt.id + '/fullsize'"
-                                        class="h-20 w-20"
+                                <div class="flex items-center justify-between mb-2 gap-3">
+                                    <button
+                                        @click="openUserByName(msg.u)"
+                                        class="text-green-400 font-black text-sm hover:text-green-300 transition text-left break-all"
                                     >
+                                        {{ msg.u || 'Bilinmeyen Kullanıcı' }}
+                                    </button>
+
+                                    <span class="opacity-30 text-[10px] font-mono whitespace-nowrap">{{ formatChatTime(msg.t) }}</span>
                                 </div>
 
-                                <div class="text-right px-6">
-                                    <p class="text-3xl font-black text-pink-500">{{ votes[i+1] || 0 }}</p>
-                                    <p class="text-[10px] opacity-40 uppercase font-black tracking-tighter">Chat Oyu</p>
-                                </div>
+                                <p class="text-sm leading-relaxed break-words" v-html="parseMessage(msg.m || '')"></p>
+                            </div>
+
+                            <div v-if="liveMessages.length === 0" class="opacity-50 text-sm">
+                                Henüz canlı mesaj gelmedi.
                             </div>
                         </div>
-
-                        <div v-if="activeQuestion.type == 'guess'" class="grid grid-cols-2 gap-6 text-white">
-                            <div class="glass p-10 rounded-[40px] text-center border-b-8 border-pink-600">
-                                <p class="text-xs font-black opacity-30 mb-4 uppercase tracking-widest">Senin Tahminin</p>
-                                <input
-                                    v-model.number="myGuess"
-                                    type="number"
-                                    class="w-full bg-black/40 border-2 border-pink-500 rounded-3xl p-6 text-6xl font-black text-center outline-none focus:ring-4 ring-pink-500/20"
-                                >
-                            </div>
-
-                            <div class="glass p-10 rounded-[40px] text-center flex flex-col justify-center border-b-8 border-yellow-600">
-                                <p class="text-xs font-black opacity-30 mb-4 uppercase tracking-widest">Chat'in Son Tahmini</p>
-                                <p class="text-6xl font-black text-yellow-400 animate-bounce">{{ lastChatGuess ?? '???' }}</p>
-                            </div>
-                        </div>
-
-                        <div class="timer-bar" :style="{ width: (timeLeft / 30 * 100) + '%' }"></div>
                     </div>
 
-                    <div v-if="gamePhase == 'leaderboard'" class="space-y-8 pb-20">
-                        <div class="glass p-8 rounded-[40px] w-full border-b-8 border-green-500 shadow-2xl text-center">
-                            <p class="text-sm font-black opacity-50 uppercase mb-2">Doğru Cevap</p>
-                            <h3 class="text-8xl font-black text-white italic uppercase">{{ activeQuestion.correctValue }}</h3>
-                            <p v-if="activeQuestion.infoText" class="mt-4 text-sm text-gray-300 font-bold">
-                                {{ activeQuestion.infoText }}
-                            </p>
+                    <div class="stat-card xl:col-span-1">
+                        <div class="flex items-center justify-between mb-6">
+                            <h4 class="font-black text-xl italic flex items-center gap-2">
+                                <div class="w-1 h-6 bg-blue-400"></div>
+                                HIZLI ÖZET
+                            </h4>
                         </div>
 
-                        <div class="grid grid-cols-2 gap-8 w-full text-white">
-                            <div class="glass p-8 rounded-[40px] border-t-4 border-pink-500">
-                                <h4 class="font-black text-pink-500 mb-6 uppercase text-center italic">Round Sıralaması</h4>
-                                <div class="space-y-2">
-                                    <div
-                                        v-for="winner in displayedRoundWinners"
-                                        :class="{ 'bg-pink-600/20 border border-pink-500/50': winner.u.includes(playerName) }"
-                                        class="flex justify-between items-center p-3 rounded-2xl bg-white/5"
-                                    >
-                                        <span class="font-black text-sm full-name">{{ winner.u }}</span>
-                                        <div class="text-right">
-                                            <span class="font-black text-white text-lg">+{{ winner.p }}</span>
-                                            <p v-if="activeQuestion.type == 'guess'" class="text-[9px] text-pink-400 font-bold uppercase">
-                                                Fark: {{ winner.diff }}
-                                            </p>
-                                        </div>
+                        <div class="space-y-3">
+                            <div class="table-row p-4">
+                                <p class="text-xs uppercase opacity-50 font-black mb-2">En aktif kullanıcı</p>
+                                <p class="text-pink-400 font-black text-lg break-all">{{ users[0]?.n || '-' }}</p>
+                            </div>
+
+                            <div class="table-row p-4">
+                                <p class="text-xs uppercase opacity-50 font-black mb-2">En çok mesaj</p>
+                                <p class="text-pink-400 font-black text-lg">{{ users[0]?.mc || 0 }}</p>
+                            </div>
+
+                            <div class="table-row p-4">
+                                <p class="text-xs uppercase opacity-50 font-black mb-2">En sık kelime</p>
+                                <p class="text-blue-400 font-black text-lg break-all">{{ words[0]?.w || '-' }}</p>
+                                <p class="text-xs opacity-50 mt-2">Kullanım: {{ words[0]?.c || 0 }}</p>
+                            </div>
+
+                            <div class="table-row p-4">
+                                <p class="text-xs uppercase opacity-50 font-black mb-2">En sık emoji</p>
+                                <p class="text-yellow-400 font-black text-lg break-all">{{ emotes[0]?.n || '-' }}</p>
+                                <p class="text-xs opacity-50 mt-2">Kullanım: {{ emotes[0]?.c || 0 }}</p>
+                            </div>
+
+                            <div class="table-row p-4">
+                                <p class="text-xs uppercase opacity-50 font-black mb-2">Spam kaydı</p>
+                                <p class="text-red-400 font-black text-lg">{{ spam.length || 0 }}</p>
+                            </div>
+
+                            <div class="table-row p-4">
+                                <p class="text-xs uppercase opacity-50 font-black mb-2">En aktif mod</p>
+                                <p class="text-cyan-400 font-black text-lg break-all">{{ topActiveMod?.n || '-' }}</p>
+                                <p class="text-xs opacity-50 mt-2">İşlem: {{ topActiveMod?.total_actions || 0 }}</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+                    <div class="stat-card">
+                        <div class="flex items-center justify-between mb-6">
+                            <h4 class="font-black text-xl italic flex items-center gap-2">
+                                <div class="w-1 h-6 bg-cyan-400"></div>
+                                EN AKTİF MODLAR
+                            </h4>
+                            <a href="/moderation.html" class="text-xs uppercase font-black text-cyan-400 hover:text-cyan-300">
+                                Panele Git
+                            </a>
+                        </div>
+
+                        <div class="space-y-3">
+                            <div
+                                v-for="mod in topMods"
+                                :key="mod.n"
+                                class="table-row p-4"
+                            >
+                                <div class="flex justify-between items-start gap-4 mb-3">
+                                    <span class="font-black text-cyan-300 break-all">{{ mod.n }}</span>
+                                    <span class="text-cyan-400 font-black">{{ mod.total_actions || 0 }}</span>
+                                </div>
+
+                                <div class="grid grid-cols-4 gap-2 text-center text-[10px] font-black uppercase tracking-tighter">
+                                    <div class="bg-white/5 p-2 rounded-xl border border-white/5">
+                                        <p class="text-yellow-400 text-base">{{ mod.timeouts || 0 }}</p>Timeout
+                                    </div>
+                                    <div class="bg-white/5 p-2 rounded-xl border border-white/5">
+                                        <p class="text-red-400 text-base">{{ mod.bans || 0 }}</p>Ban
+                                    </div>
+                                    <div class="bg-white/5 p-2 rounded-xl border border-white/5">
+                                        <p class="text-green-400 text-base">{{ mod.unbans || 0 }}</p>Unban
+                                    </div>
+                                    <div class="bg-white/5 p-2 rounded-xl border border-white/5">
+                                        <p class="text-pink-400 text-base">{{ mod.deleted_messages || 0 }}</p>Silme
                                     </div>
                                 </div>
                             </div>
 
-                            <div class="glass p-8 rounded-[40px] border-t-4 border-yellow-500 bg-yellow-500/5">
-                                <h4 class="font-black text-yellow-500 mb-6 uppercase text-center italic">Genel Puan Durumu</h4>
-                                <div
-                                    v-for="winner in displayedGlobalWinners"
-                                    :class="{ 'bg-yellow-600/20 border border-yellow-500/50': winner.u.includes(playerName) }"
-                                    class="flex justify-between items-center p-3 rounded-2xl bg-white/5 mb-2"
-                                >
-                                    <span class="font-black text-sm full-name">
-                                        <span class="opacity-30 mr-2">#{{ winner.rank }}</span> {{ winner.u }}
-                                    </span>
-                                    <span class="font-black text-yellow-400 text-lg">{{ winner.total }} P</span>
-                                </div>
+                            <div v-if="topMods.length === 0" class="opacity-50 text-sm">
+                                Mod verisi bulunamadı.
                             </div>
                         </div>
-
-                        <button
-                            @click="nextStep"
-                            class="w-full bg-pink-600 py-8 rounded-[40px] text-4xl font-black shadow-2xl hover:bg-pink-500 transition text-white italic uppercase"
-                        >
-                            SIRADAKİ ROUND &raquo;
-                        </button>
                     </div>
-                </div>
 
-                <div v-if="tab == 'genel'" class="space-y-10">
-                    <div class="grid grid-cols-4 gap-6">
-                        <div v-for="stat in mainStats" class="glass p-6 rounded-3xl border border-white/5">
-                            <p class="opacity-50 text-xs font-bold mb-1 uppercase tracking-widest">{{ stat.label }}</p>
-                            <h3 class="text-4xl font-black text-white italic">{{ stat.val }}</h3>
+                    <div class="stat-card">
+                        <div class="flex items-center justify-between mb-6">
+                            <h4 class="font-black text-xl italic flex items-center gap-2">
+                                <div class="w-1 h-6 bg-cyan-400"></div>
+                                SON MOD İŞLEMLERİ
+                            </h4>
                         </div>
-                    </div>
 
-                    <div>
-                        <h4 class="mb-6 font-black text-xl flex items-center gap-2 italic">
-                            <div class="w-1 h-6 bg-pink-600"></div>
-                            TOP 15 İZLEYİCİ SIRALAMASI
-                        </h4>
-
-                        <div class="flex gap-4 overflow-x-auto pb-4 scroll-flat">
+                        <div class="space-y-3 max-h-[420px] overflow-y-auto scroll-flat pr-2">
                             <div
-                                v-for="(u, i) in users.slice(0, 15)"
-                                @click="selectedUser = u"
-                                class="min-w-[240px] glass p-6 rounded-3xl flex-shrink-0 group hover:scale-105 transition cursor-pointer border border-white/10 relative overflow-hidden"
+                                v-for="(action, idx) in recentModActions"
+                                :key="'mod-' + idx"
+                                class="p-4 rounded-[20px] bg-white/5 border border-white/5"
                             >
-                                <span class="absolute -right-4 -top-4 text-7xl font-black opacity-5 group-hover:opacity-10">#{{ i+1 }}</span>
-                                <p class="font-black text-2xl mb-4 uppercase italic full-name">{{ u.n }}</p>
-                                <div class="flex justify-between items-end">
-                                    <p class="text-4xl font-black text-pink-500">{{ u.mc }}</p>
-                                    <p class="text-[10px] opacity-40 uppercase font-black">Mesaj</p>
+                                <div class="flex justify-between items-center gap-3 mb-2">
+                                    <span class="font-black" :class="getActionColor(action.action)">
+                                        {{ (action.action || '-').toUpperCase() }}
+                                    </span>
+                                    <span class="opacity-30 text-[10px] font-mono">{{ action.t || '-' }}</span>
                                 </div>
+
+                                <p class="text-sm break-words">
+                                    <span class="text-cyan-400 font-black">{{ action.mod || 'Unknown Mod' }}</span>
+                                    →
+                                    <span class="font-black">{{ action.target || 'Bilinmiyor' }}</span>
+                                </p>
+
+                                <p v-if="action.reason" class="text-xs opacity-60 mt-2">Sebep: {{ action.reason }}</p>
+                                <p v-if="action.duration" class="text-xs opacity-60 mt-1">Süre: {{ action.duration }}</p>
+                                <div v-if="action.msg" class="text-xs opacity-70 mt-2 break-words" v-html="parseMessage(action.msg)"></div>
+                            </div>
+
+                            <div v-if="recentModActions.length === 0" class="opacity-50 text-sm">
+                                Moderasyon aksiyonu bulunamadı.
                             </div>
                         </div>
                     </div>
                 </div>
-
-                <div v-if="tab == 'users'" class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <div
-                        v-for="(u, i) in filteredUsers"
-                        @click="selectedUser = u"
-                        class="glass p-6 rounded-[32px] hover:border-pink-600 transition cursor-pointer relative group"
-                    >
-                        <div class="flex justify-between items-start mb-6">
-                            <h5 class="font-black text-2xl uppercase italic full-name pr-8">{{ u.n }}</h5>
-                            <span class="text-5xl font-black text-white/5 group-hover:text-pink-600">#{{ i+1 }}</span>
-                        </div>
-
-                        <div class="grid grid-cols-3 gap-2 text-center text-[10px] font-black uppercase tracking-tighter">
-                            <div class="bg-white/5 p-3 rounded-2xl border border-white/5">
-                                <p class="text-pink-400 text-xl">{{ u.mc }}</p>Mesaj
-                            </div>
-                            <div class="bg-white/5 p-3 rounded-2xl border border-white/5">
-                                <p class="text-blue-400 text-xl">{{ u.wc }}</p>Kelime
-                            </div>
-                            <div class="bg-white/5 p-3 rounded-2xl border border-white/5">
-                                <p class="text-green-400 text-xl">{{ u.ec }}</p>Emoji
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <div v-if="tab == 'words'" class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                    <div v-for="(w, idx) in filteredWords" class="glass p-6 rounded-3xl group relative hover:bg-white/5 transition border border-white/5">
-                        <div class="flex justify-between items-center mb-2 text-[10px] font-black italic">
-                            <span class="text-pink-500">#{{ idx+1 }}</span>
-                            <span class="bg-pink-600 px-2 py-0.5 rounded text-white">{{ w.c }} KEZ</span>
-                        </div>
-
-                        <p class="font-black text-xl uppercase italic full-name">"{{ w.w }}"</p>
-
-                        <div class="tooltip-box">
-                            <p class="text-[10px] font-black uppercase text-pink-400 mb-3 tracking-widest text-center italic">
-                                En Çok Kullananlar
-                            </p>
-                            <div v-for="top in (w.top || [])" class="flex justify-between text-xs py-1.5 border-b border-white/5 last:border-0 text-white">
-                                <span>{{ top.u }}</span><b>{{ top.c }}</b>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <div v-if="tab == 'emojis'" class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                    <div v-for="(e, idx) in filteredEmotes" class="glass p-6 rounded-3xl group relative hover:bg-white/5 transition border border-white/5">
-                        <div class="flex justify-between items-center mb-3 text-[10px] font-black italic">
-                            <span class="text-yellow-400">#{{ idx + 1 }}</span>
-                            <span class="bg-yellow-500 text-black px-2 py-0.5 rounded">{{ e.c }} KEZ</span>
-                        </div>
-
-                        <div class="flex flex-col items-center text-center gap-3">
-                            <img :src="'https://files.kick.com/emotes/' + e.id + '/fullsize'" class="h-20 w-20 object-contain">
-                            <p class="font-black text-sm uppercase italic full-name">{{ e.n }}</p>
-                        </div>
-
-                        <div class="tooltip-box">
-                            <p class="text-[10px] font-black uppercase text-yellow-400 mb-3 tracking-widest text-center italic">
-                                En Çok Kullananlar
-                            </p>
-                            <div v-for="top in (e.top || [])" class="flex justify-between text-xs py-1.5 border-b border-white/5 last:border-0 text-white">
-                                <span>{{ top.u }}</span><b>{{ top.c }}</b>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <div v-if="tab == 'spam'" class="max-w-4xl mx-auto space-y-4">
-                    <div
-                        v-for="(s, i) in filteredSpam"
-                        class="glass p-6 rounded-[32px] flex items-center justify-between border-l-8 border-red-600 group relative hover:translate-x-3 transition"
-                    >
-                        <div class="flex items-center gap-6 text-white">
-                            <span class="text-3xl font-black opacity-10 italic w-12 text-center">#{{ i+1 }}</span>
-                            <p class="text-lg font-bold opacity-90 italic" v-html="parseMessage(s.m)"></p>
-                        </div>
-
-                        <span class="bg-red-600 text-white px-5 py-2 rounded-full text-xl font-black shadow-lg italic">{{ s.c }}</span>
-
-                        <div class="tooltip-box !right-0 !left-auto !translate-x-0">
-                            <p class="text-[10px] font-black uppercase text-red-500 mb-3 tracking-widest text-center">Spam Liderleri</p>
-                            <div v-for="top in (s.top || [])" class="flex justify-between text-xs py-1.5 border-b border-white/5 text-white last:border-0">
-                                <span>{{ top.u }}</span><b>{{ top.c }}</b>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
             </section>
         </main>
 
@@ -482,40 +340,64 @@
 
                 <div class="w-full max-w-2xl glass h-full shadow-2xl flex flex-col z-10 border-l border-white/10 text-white">
                     <div class="p-10 border-b border-white/5">
-                        <div class="flex justify-between items-start">
-                            <div class="flex-1">
+                        <div class="flex justify-between items-start gap-4">
+                            <div class="flex-1 min-w-0">
                                 <span class="text-pink-500 font-black text-xs uppercase italic">İzleyici Detayı</span>
-                                <h2 class="text-6xl font-black mt-2 italic uppercase tracking-tighter full-name">{{ selectedUser.n }}</h2>
+                                <h2 class="text-4xl md:text-6xl font-black mt-2 italic uppercase tracking-tighter break-all">{{ selectedUser.n }}</h2>
                             </div>
+
                             <button @click="selectedUser = null" class="text-5xl hover:text-red-500 transition leading-none ml-4">&times;</button>
                         </div>
 
-                        <div class="grid grid-cols-2 gap-4 mt-8">
+                        <div class="grid grid-cols-3 gap-4 mt-8 text-center text-[10px] font-black uppercase tracking-tighter">
+                            <div class="bg-white/5 p-4 rounded-3xl border border-white/5">
+                                <p class="text-pink-400 text-2xl">{{ selectedUser.mc || 0 }}</p>Mesaj
+                            </div>
+                            <div class="bg-white/5 p-4 rounded-3xl border border-white/5">
+                                <p class="text-blue-400 text-2xl">{{ selectedUser.wc || 0 }}</p>Kelime
+                            </div>
+                            <div class="bg-white/5 p-4 rounded-3xl border border-white/5">
+                                <p class="text-green-400 text-2xl">{{ selectedUser.ec || 0 }}</p>Emoji
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-8">
                             <div class="bg-white/5 p-4 rounded-3xl border border-white/5">
                                 <p class="text-[10px] font-black text-pink-500 uppercase mb-3">En Çok Kullandığı Kelimeler</p>
-                                <div v-for="w in (selectedUser.tw || [])" class="flex justify-between text-xs py-1.5 opacity-80 border-b border-white/5 last:border-0 italic">
-                                    <span>"{{ w[0] }}"</span><b>{{ w[1] }}</b>
+                                <div v-for="(w, i) in (selectedUser.tw || [])" :key="i" class="flex justify-between text-xs py-1.5 opacity-80 border-b border-white/5 last:border-0 italic">
+                                    <span>"{{ Array.isArray(w) ? w[0] : (w.w || '-') }}"</span><b>{{ Array.isArray(w) ? w[1] : (w.c || 0) }}</b>
                                 </div>
+                                <div v-if="!(selectedUser.tw || []).length" class="text-xs opacity-40">Veri yok</div>
                             </div>
 
                             <div class="bg-white/5 p-4 rounded-3xl border border-white/5">
                                 <p class="text-[10px] font-black text-green-500 uppercase mb-3">Favori Emojileri</p>
-                                <div v-for="e in (selectedUser.te || [])" class="flex justify-between items-center text-xs py-1 opacity-80 border-b border-white/5 last:border-0">
-                                    <span class="flex items-center gap-2">
-                                        <img :src="'https://files.kick.com/emotes/' + e.id + '/fullsize'" class="h-6 w-6">
-                                        {{ e.n }}
+                                <div v-for="(e, i) in (selectedUser.te || [])" :key="i" class="flex justify-between items-center text-xs py-1 opacity-80 border-b border-white/5 last:border-0">
+                                    <span class="flex items-center gap-2 min-w-0">
+                                        <img v-if="e.id" :src="'https://files.kick.com/emotes/' + e.id + '/fullsize'" class="h-6 w-6">
+                                        <span class="truncate">{{ e.n }}</span>
                                     </span>
                                     <b>{{ e.c }}</b>
                                 </div>
+                                <div v-if="!(selectedUser.te || []).length" class="text-xs opacity-40">Veri yok</div>
                             </div>
                         </div>
                     </div>
 
                     <div class="flex-1 overflow-y-auto p-10 bg-black/30 space-y-4 scroll-flat">
                         <p class="text-[10px] font-black opacity-30 uppercase italic">Son Mesajları</p>
-                        <div v-for="log in (selectedUser.logs || [])" class="p-5 rounded-[24px] bg-white/5 border-l-4 border-pink-500 text-sm">
+
+                        <div
+                            v-for="(log, i) in (selectedUser.logs || [])"
+                            :key="i"
+                            class="p-5 rounded-[24px] bg-white/5 border-l-4 border-pink-500 text-sm"
+                        >
                             <span class="opacity-30 text-[10px] block mb-2 font-mono">{{ log.t }}</span>
                             <p v-html="parseMessage(log.m)"></p>
+                        </div>
+
+                        <div v-if="!(selectedUser.logs || []).length" class="opacity-40 text-sm">
+                            Son mesaj kaydı bulunamadı.
                         </div>
                     </div>
                 </div>
@@ -523,425 +405,232 @@
         </transition>
     </div>
 
+    <script src="/assets/js/common.js"></script>
     <script>
         const { createApp } = Vue;
 
         createApp({
             data() {
+                const now = new Date();
+                const yyyy = now.getFullYear();
+                const mm = String(now.getMonth() + 1).padStart(2, '0');
+                const dd = String(now.getDate()).padStart(2, '0');
+
                 return {
-                    tab: 'genel',
-                    gamePhase: 'lobby',
-                    currentQuestionIndex: 0,
-                    playerName: '',
-                    timeLeft: 30,
-                    transitionTime: 5,
-                    search: '',
+                    stats: {},
                     users: [],
                     words: [],
                     emotes: [],
                     spam: [],
-                    stats: {},
-                    gameSpecial: {
-                        all_pool: [],
-                        top_5_users: [],
-                        top_5_words: [],
-                        top_5_emotes: []
+                    moderation: {
+                        summary: {},
+                        mods: [],
+                        recent_actions: []
                     },
-                    votes: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
-                    mySelection: null,
-                    myGuess: 0,
-                    lastChatGuess: null,
-                    roundWinners: [],
-                    globalScores: {},
-                    totalInfiniteRounds: 10,
-                    showAnswers: false,
-                    timer: null,
-                    transitionTimer: null,
                     selectedUser: null,
-                    isConnected: false,
                     liveMessages: [],
-                    liveUsersData: {},
-                    activeQuestion: {
-                        options: [],
-                        target: '',
-                        correctValue: '',
-                        infoText: ''
-                    }
+                    isConnected: false,
+                    socketRef: null,
+
+                    filterMode: 'live',
+                    selectedStreamId: '',
+                    selectedDate: `${yyyy}-${mm}-${dd}`,
+                    selectedMonth: `${yyyy}-${mm}`,
+                    streamOptions: [],
+                    apiMeta: {},
+                    selectedStream: null,
+                    loading: false,
+                    autoRefreshTimer: null
                 };
             },
 
             computed: {
-                isGameTab() {
-                    return ['game', 'kelimeTahmin', 'emojiTahmin'].includes(this.tab);
+                sidebar() {
+                    return sidebarHtml('index');
+                },
+
+                currentLabel() {
+                    return getReadableFilterLabel(
+                        {
+                            mode: this.filterMode,
+                            stream_id: this.selectedStreamId,
+                            date: this.selectedDate,
+                            month: this.selectedMonth
+                        },
+                        this.apiMeta,
+                        this.selectedStream
+                    );
                 },
 
                 mainStats() {
                     return [
-                        { label: 'Chata mesaj gönderen Farklı İzleyici sayısı', val: this.stats?.total_users || 0 },
+                        { label: 'Farklı Chat Kullanıcısı', val: this.stats?.total_users || 0 },
                         { label: 'Toplam Mesaj', val: this.stats?.total_msgs || 0 },
                         { label: 'Analiz Edilen Kelime', val: this.words.length || 0 },
-                        { label: 'Gönderilen Emoji Çeşidi', val: this.emotes.length || 0 }
+                        { label: 'Emoji Çeşidi', val: this.emotes.length || 0 }
                     ];
                 },
 
-                isGameOver() {
-                    const total = this.tab == 'game' ? 7 : this.totalInfiniteRounds;
-                    return this.currentQuestionIndex >= (total - 1);
+                moderationSummary() {
+                    return this.moderation?.summary || {};
                 },
 
-                filteredUsers() {
-                    return this.users
-                        .filter(u => (u.n || '').toLowerCase().includes(this.search.toLowerCase()))
-                        .slice(0, 100);
+                filteredModsForSummary() {
+                    return (this.moderation?.mods || []).filter(m => {
+                        const n = String(m.n || '').toLowerCase();
+                        return n !== 'system/bot' && n !== 'botrix';
+                    });
                 },
 
-                filteredWords() {
-                    return this.words
-                        .filter(w => (w.w || '').toLowerCase().includes(this.search.toLowerCase()))
-                        .slice(0, 150);
+                topMods() {
+                    return this.filteredModsForSummary.slice(0, 5);
                 },
 
-                filteredEmotes() {
-                    return this.emotes
-                        .filter(e => (e.n || '').toLowerCase().includes(this.search.toLowerCase()))
-                        .sort((a, b) => (b.c || 0) - (a.c || 0))
-                        .slice(0, 150);
+                topActiveMod() {
+                    return this.filteredModsForSummary[0] || null;
                 },
 
-                filteredSpam() {
-                    return this.spam
-                        .filter(s => (s.m || '').toLowerCase().includes(this.search.toLowerCase()))
-                        .slice(0, 50);
-                },
-
-                displayedRoundWinners() {
-                    return [...this.roundWinners].sort((a, b) => b.p - a.p).slice(0, 10);
-                },
-
-                displayedGlobalWinners() {
-                    const sorted = Object.entries(this.globalScores)
-                        .map(([u, total]) => ({ u, total }))
-                        .sort((a, b) => b.total - a.total);
-
-                    sorted.forEach((w, i) => w.rank = i + 1);
-                    return sorted.slice(0, 10);
+                recentModActions() {
+                    return (this.moderation?.recent_actions || []).slice().reverse().slice(0, 15);
                 }
             },
 
             methods: {
-                getHeaderTitle() {
-                    const t = {
-                        genel: '13 Mart Chat Veri Analizi',
-                        liveChat: 'Canlı Chat Akışı',
-                        game: 'RR Arena Şampiyonası ',
-                        kelimeTahmin: 'Kelime Sayısı Tahmini (13 Mart chatine göre.)',
-                        emojiTahmin: 'Emoji Sayısı Tahmini (13 Mart chatine göre.)',
-                        emojis: '13 Mart Emoji Leaderboard',
-                        users: '13 Mart Chat Leaderboard',
-                        words: '13 Mart Kelime Kütüphanesi',
-                        spam: '13 Mart Spam Filtresi'
-                    };
-                    return t[this.tab] || 'RRaenee';
+                parseMessage,
+                getActionColor,
+                formatChatTime,
+
+                formatStreamLabel(stream) {
+                    if (!stream) return '-';
+                    if (stream.display_label) return stream.display_label;
+
+                    const date = stream?.label_date ? formatHumanDate(stream.label_date) : '-';
+                    const started = stream?.started_at
+                        ? new Date(stream.started_at).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })
+                        : '--:--';
+
+                    const suffix = stream?.session_type === 'offstream' ? 'offstream' : 'yayını';
+                    return `${date} ${suffix} · ${started}`;
                 },
 
-                setTab(t) {
-                    this.tab = t;
-                    this.resetGame();
+                openUserByName(name) {
+                    const found = this.users.find(u => (u.n || '').toLowerCase() === String(name || '').toLowerCase());
+                    if (found) this.selectedUser = found;
                 },
 
-                resetGame() {
-                    if (this.timer) clearInterval(this.timer);
-                    if (this.transitionTimer) clearInterval(this.transitionTimer);
-
-                    this.gamePhase = 'lobby';
-                    this.currentQuestionIndex = 0;
-                    this.globalScores = {};
-                    this.timeLeft = 30;
-                    this.transitionTime = 5;
-                    this.showAnswers = false;
-                    this.roundWinners = [];
-                    this.mySelection = null;
-                    this.myGuess = 0;
-                    this.lastChatGuess = null;
-                    this.activeQuestion = {
-                        options: [],
-                        target: '',
-                        correctValue: '',
-                        infoText: ''
-                    };
-                },
-
-                startTransition() {
-                    if (this.tab === 'kelimeTahmin' && (!this.gameSpecial?.all_pool || !this.gameSpecial.all_pool.length)) {
-                        alert('Kelime oyunu için veri yüklenmemiş veya all_pool boş.');
-                        return;
-                    }
-
-                    if (this.tab === 'emojiTahmin' && (!this.emotes || !this.emotes.length)) {
-                        alert('Emoji oyunu için veri yüklenmemiş.');
-                        return;
-                    }
-
-                    if (this.tab === 'game') {
-                        const hasUsers = Array.isArray(this.gameSpecial?.top_5_users) && this.gameSpecial.top_5_users.length > 0;
-                        const hasWords = Array.isArray(this.gameSpecial?.top_5_words) && this.gameSpecial.top_5_words.length > 0;
-                        const hasEmotes = Array.isArray(this.gameSpecial?.top_5_emotes) && this.gameSpecial.top_5_emotes.length > 0;
-                        const hasPool = Array.isArray(this.gameSpecial?.all_pool) && this.gameSpecial.all_pool.length > 0;
-
-                        if (!hasUsers || !hasWords || !hasEmotes || !hasPool) {
-                            alert('Arena verisi eksik. game_special içeriğini kontrol et.');
-                            return;
-                        }
-                    }
-
-                    this.gamePhase = 'countdown';
-                    this.transitionTime = 5;
-                    this.setupActiveQuestion();
-
-                    this.transitionTimer = setInterval(() => {
-                        if (this.transitionTime > 1) {
-                            this.transitionTime--;
-                        } else {
-                            clearInterval(this.transitionTimer);
-                            this.startQuestion();
-                        }
-                    }, 1000);
-                },
-
-                setupActiveQuestion() {
-                    const idx = this.currentQuestionIndex;
-                    const prefix = "YAYIN VERİSİNE GÖRE: ";
-                    let q = {};
-
-                    if (this.tab == 'game') {
-                        if (idx == 0) {
-    const opts = this.shuffle([...(this.gameSpecial.top_5_users || [])].slice(0, 5));
-    const topUser = (this.gameSpecial.top_5_users || [])[0];
-    const secondUser = (this.gameSpecial.top_5_users || [])[1];
-    const thirdUser = (this.gameSpecial.top_5_users || [])[2];
-
-    q = {
-        type: 'quiz',
-        title: prefix + 'EN ÇOK MESAJ ATAN KİM?',
-        options: opts,
-        isEmoji: false,
-        correctValue: topUser?.n || '-',
-        infoText: topUser
-            ? `${topUser.n} toplam ${topUser.mc ?? topUser.c ?? 0} mesaj atmış.${secondUser ? ' Ardından ' + secondUser.n + ' ' + (secondUser.mc ?? secondUser.c ?? 0) + ' mesaj, ' : ''}${thirdUser ? thirdUser.n + ' ' + (thirdUser.mc ?? thirdUser.c ?? 0) + ' mesajla geliyor.' : ''}`
-            : 'Kullanıcı verisi yok.'
-    };
-}
-                        else if (idx == 1) {
-    const opts = this.shuffle([...(this.gameSpecial.top_5_emotes || [])].slice(0, 5));
-    const topEmote = (this.gameSpecial.top_5_emotes || [])[0];
-    const fullEmote = this.emotes.find(e => e.n === topEmote?.n);
-
-    q = {
-        type: 'quiz',
-        title: prefix + 'EN ÇOK ATILAN EMOJİ?',
-        options: opts,
-        isEmoji: true,
-        correctValue: topEmote?.n || '-',
-        infoText: topEmote
-            ? `${topEmote.n} emojisi toplam ${topEmote.c ?? 0} kez kullanılmış.${fullEmote?.top?.length ? ' En çok kullananlar: ' + this.formatTopList(fullEmote.top) : ''}`
-            : 'Emoji verisi yok.'
-    };
-}
-                       else if (idx == 2) {
-    const opts = this.shuffle([...(this.gameSpecial.top_5_words || [])].slice(0, 5));
-    const topWord = (this.gameSpecial.top_5_words || [])[0];
-    const fullWord = this.words.find(w => w.w === topWord?.w);
-
-    q = {
-        type: 'quiz',
-        title: prefix + 'EN ÇOK YAZILAN KELİME?',
-        options: opts,
-        isEmoji: false,
-        correctValue: topWord?.w || '-',
-        infoText: topWord
-            ? `"${topWord.w}" kelimesi toplam ${topWord.c ?? 0} kez yazılmış.${fullWord?.top?.length ? ' En çok yazanlar: ' + this.formatTopList(fullWord.top) : ''}`
-            : 'Kelime verisi yok.'
-    };
-}
-                        else {
-                            const pool = Array.isArray(this.gameSpecial?.all_pool) ? this.gameSpecial.all_pool : [];
-                            const maxPick = Math.min(pool.length, 150);
-                            const rw = maxPick > 0 ? pool[Math.floor(Math.random() * maxPick)] : null;
-
-                            if (!rw) {
-                                q = {
-                                    type: 'guess',
-                                    title: prefix + 'BU KELİME KAÇ KEZ YAZILDI?',
-                                    target: 'VERİ YOK',
-                                    correct: 0,
-                                    correctValue: '0 Kez',
-                                    infoText: 'game_special.all_pool boş görünüyor.'
-                                };
-                            } else {
-                                q = {
-                                    type: 'guess',
-                                    title: prefix + 'BU KELİME KAÇ KEZ YAZILDI?',
-                                    target: rw.w,
-                                    correct: rw.c,
-                                    correctValue: `${rw.c} Kez`,
-                                    infoText: Array.isArray(rw.top) && rw.top.length
-                                        ? rw.top.slice(0, 3).map(x => `${x.u}: ${x.c}`).join(' • ')
-                                        : `"${rw.w}" kelimesi toplam ${rw.c} kez yazılmış.`
-                                };
-                            }
-                        }
-                    }
-                    else if (this.tab == 'kelimeTahmin') {
-                        const pool = Array.isArray(this.gameSpecial?.all_pool) ? this.gameSpecial.all_pool : [];
-
-                        if (!pool.length) {
-                            q = {
-                                type: 'guess',
-                                title: prefix + 'BU KELİME KAÇ KEZ GEÇTİ?',
-                                target: 'VERİ YOK',
-                                correct: 0,
-                                correctValue: '0 Kez',
-                                infoText: 'site_data.json içinde game_special.all_pool boş veya eksik.'
-                            };
-                        } else {
-                            const rw = pool[Math.floor(Math.random() * pool.length)];
-                            q = {
-                                type: 'guess',
-                                title: prefix + 'BU KELİME KAÇ KEZ GEÇTİ?',
-                                target: rw.w,
-                                correct: rw.c,
-                                correctValue: `${rw.c} Kez`,
-                                infoText: Array.isArray(rw.top) && rw.top.length
-                                    ? rw.top.slice(0, 3).map(x => `${x.u}: ${x.c}`).join(' • ')
-                                    : `"${rw.w}" kelimesi toplam ${rw.c} kez geçmiş.`
-                            };
-                        }
-                    }
-                    else if (this.tab == 'emojiTahmin') {
-                        const emojiPool = Array.isArray(this.emotes) ? this.emotes : [];
-
-                        if (!emojiPool.length) {
-                            q = {
-                                type: 'guess',
-                                title: prefix + 'BU EMOJİ KAÇ KEZ ATILDI?',
-                                target: '',
-                                targetId: '',
-                                correct: 0,
-                                correctValue: '0 Kez',
-                                infoText: 'site_data.json içinde emotes boş veya eksik.'
-                            };
-                        } else {
-                            const re = emojiPool[Math.floor(Math.random() * emojiPool.length)];
-                            q = {
-                                type: 'guess',
-                                title: prefix + 'BU EMOJİ KAÇ KEZ ATILDI?',
-                                target: re.n,
-                                targetId: re.id,
-                                correct: re.c,
-                                correctValue: `${re.c} Kez`,
-                                infoText: Array.isArray(re.top) && re.top.length
-                                    ? re.top.slice(0, 3).map(x => `${x.u}: ${x.c}`).join(' • ')
-                                    : `${re.n} emojisi toplam ${re.c} kez atılmış.`
-                            };
-                        }
-                    }
-
-                    if (q.type == 'quiz') {
-                        q.correctIndex = q.options.findIndex(x => (x.n || x.w) == q.correctValue) + 1;
-                    }
-
-                    this.activeQuestion = q;
-                    this.liveUsersData = {};
-                },
-
-                startQuestion() {
-                    this.gamePhase = 'playing';
-                    this.timeLeft = 30;
-                    this.showAnswers = false;
-                    this.mySelection = null;
-                    this.myGuess = 0;
-                    this.lastChatGuess = null;
-                    this.votes = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
-
-                    this.timer = setInterval(() => {
-                        if (this.timeLeft > 0) {
-                            this.timeLeft--;
-                        } else {
-                            clearInterval(this.timer);
-                            this.endRound();
-                        }
-                    }, 1000);
-                },
-
-                selectAnswer(i) {
-                    if (this.gamePhase == 'playing' && !this.showAnswers) {
-                        this.mySelection = i;
+                async fetchStreams() {
+                    try {
+                        this.streamOptions = await fetchStreams(120);
+                    } catch (e) {
+                        console.error('stream listesi alınamadı:', e);
+                        this.streamOptions = [];
                     }
                 },
 
-                endRound() {
-                    this.showAnswers = true;
+                buildApiUrl() {
+                    if (this.filterMode === 'live') {
+                        return '/api/data?mode=live';
+                    }
+                    if (this.filterMode === 'offstream_live') {
+                        return '/api/data?mode=offstream_live';
+                    }
+                    if (this.filterMode === 'stream') {
+                        if (!this.selectedStreamId) return null;
+                        return `/api/data?mode=stream&stream_id=${encodeURIComponent(this.selectedStreamId)}`;
+                    }
+                    if (this.filterMode === 'day') {
+                        if (!this.selectedDate) return null;
+                        return `/api/data?mode=day&date=${encodeURIComponent(this.selectedDate)}`;
+                    }
+                    if (this.filterMode === 'offstream_day') {
+                        if (!this.selectedDate) return null;
+                        return `/api/data?mode=offstream_day&date=${encodeURIComponent(this.selectedDate)}`;
+                    }
+                    if (this.filterMode === 'week') {
+                        return '/api/data?mode=week';
+                    }
+                    if (this.filterMode === 'month') {
+                        if (!this.selectedMonth) return null;
+                        return `/api/data?mode=month&month=${encodeURIComponent(this.selectedMonth)}`;
+                    }
+                    return '/api/data?mode=all';
+                },
 
-                    setTimeout(() => {
-                        this.gamePhase = 'leaderboard';
-                        let results = [];
-                        const correct = this.activeQuestion.correct;
+                syncFilterState() {
+                    setFilterState({
+                        mode: this.filterMode,
+                        stream_id: this.selectedStreamId,
+                        date: this.selectedDate,
+                        month: this.selectedMonth
+                    });
+                },
 
-                        Object.entries(this.liveUsersData).forEach(([u, data]) => {
-                            let p = 50;
-                            let diff = 0;
+                async fetchDashboardData() {
+                    const url = this.buildApiUrl();
+                    if (!url) return;
 
-                            if (this.activeQuestion.type === 'quiz') {
-                                if (data.choice === this.activeQuestion.correctIndex) {
-                                    p += Math.max(100, 450 - (data.time * 10));
-                                }
-                            } else {
-                                diff = Math.abs((data.guess ?? 0) - correct);
-                                p += Math.max(0, 450 - (diff * 2));
-                            }
+                    this.syncFilterState();
+                    this.loading = true;
 
-                            results.push({ u, p: Math.floor(p), diff });
-                        });
+                    try {
+                        const res = await fetch(url);
+                        const data = await res.json();
 
-                        let myP = 50;
-                        let myDiff = 0;
-
-                        if (this.activeQuestion.type == 'quiz') {
-                            if (this.mySelection == this.activeQuestion.correctIndex) {
-                                myP += 450;
-                            }
-                        } else {
-                            myDiff = Math.abs((Number(this.myGuess) || 0) - correct);
-                            myP += Math.max(0, 450 - (myDiff * 2));
+                        if (!data.ok) {
+                            throw new Error(data.error || 'api_error');
                         }
 
-                        results.push({
-                            u: this.playerName + " (SEN)",
-                            p: Math.floor(myP),
-                            diff: myDiff
-                        });
+                        const transformed = transformApiData(data);
 
-                        this.roundWinners = results.sort((a, b) => b.p - a.p);
+                        this.stats = transformed.stats || {};
+                        this.users = transformed.users || [];
+                        this.words = transformed.words || [];
+                        this.emotes = transformed.emotes || [];
+                        this.spam = transformed.spam || [];
+                        this.moderation = transformed.moderation || {
+                            summary: {},
+                            mods: [],
+                            recent_actions: []
+                        };
 
-                        this.roundWinners.forEach(w => {
-                            this.globalScores[w.u] = (this.globalScores[w.u] || 0) + w.p;
-                        });
-                    }, 1500);
+                        this.apiMeta = data.meta || {};
+                        this.selectedStream = data.stream || null;
+                        this.selectedUser = null;
+                    } catch (err) {
+                        console.error(err);
+                        alert('API verisi okunamadı.');
+                    } finally {
+                        this.loading = false;
+                    }
                 },
 
-                nextStep() {
-                    if (!this.isGameOver) {
-                        this.currentQuestionIndex++;
-                        this.startTransition();
-                    } else {
-                        alert("ARENA BİTTİ!");
-                        this.setTab('genel');
+                handleModeChange() {
+                    if (this.filterMode === 'stream' && !this.selectedStreamId && this.streamOptions.length > 0) {
+                        this.selectedStreamId = String(this.streamOptions[0].id);
+                    }
+
+                    this.syncFilterState();
+                    this.fetchDashboardData();
+                    this.setupAutoRefresh();
+                },
+
+                setupAutoRefresh() {
+                    if (this.autoRefreshTimer) {
+                        clearInterval(this.autoRefreshTimer);
+                        this.autoRefreshTimer = null;
+                    }
+
+                    if (this.filterMode === 'live' || this.filterMode === 'offstream_live') {
+                        this.autoRefreshTimer = setInterval(() => {
+                            this.fetchDashboardData();
+                        }, 5000);
                     }
                 },
 
                 initLiveKickChat() {
                     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
                     const socket = new WebSocket(`${protocol}//${location.host}/ws`);
+                    this.socketRef = socket;
 
                     socket.onopen = () => {
                         this.isConnected = true;
@@ -952,132 +641,71 @@
                         setTimeout(() => this.initLiveKickChat(), 5000);
                     };
 
+                    socket.onerror = () => {
+                        this.isConnected = false;
+                    };
+
                     socket.onmessage = (event) => {
                         try {
                             const data = JSON.parse(event.data);
                             if (data.type !== 'chat') return;
 
-                            const user = data.user;
-                            const msg = String(data.msg);
-                            const cleanMsg = msg.replace(/\[emote:\d+:\w+\]/g, "").trim();
-
                             this.liveMessages.unshift({
-                                id: `${Date.now()}-${Math.random()}`,
-                                u: user,
-                                m: msg
+                                u: data.user || 'Bilinmeyen Kullanıcı',
+                                m: String(data.msg || ''),
+                                t: data.t || data.time || new Date().toISOString()
                             });
 
                             if (this.liveMessages.length > 50) {
                                 this.liveMessages.pop();
                             }
-
-                            if (this.gamePhase === 'playing') {
-
-    if (this.activeQuestion.type === 'quiz') {
-
-        const v = parseInt(cleanMsg, 10);
-
-        if (v >= 1 && v <= 5) {
-
-            const previous = this.liveUsersData[user];
-
-            // Eğer daha önce oy verdiyse eski oyunu düş
-            if (previous && previous.choice >= 1 && previous.choice <= 5) {
-
-                this.votes[previous.choice] =
-                    Math.max(0, (this.votes[previous.choice] || 0) - 1);
-
-            }
-
-            // Yeni oyu ekle
-            this.votes[v] = (this.votes[v] || 0) + 1;
-
-            // Kullanıcı verisini güncelle
-            this.liveUsersData[user] = {
-
-                choice: v,
-
-                // ilk cevap zamanı sabit kalır
-                time: previous?.time ?? (30 - this.timeLeft),
-
-                // son değiştirme zamanı (istersen kullanırsın)
-                lastChangeTime: 30 - this.timeLeft
-            };
-
-        }
-
-    } else {
-
-        const g = parseInt(cleanMsg.replace(/[^0-9]/g, ''), 10);
-
-        if (!isNaN(g)) {
-
-            this.lastChatGuess = g;
-
-            this.liveUsersData[user] = {
-
-                guess: g,
-
-                time: 30 - this.timeLeft
-
-            };
-
-        }
-
-    }
-
-}
                         } catch (e) {
                             console.error('WS mesaj parse hatası:', e);
                         }
                     };
-                },
-
-                parseMessage(msg) {
-                    return String(msg || '').replace(
-                        /\[emote:(\d+):(\w+)\]/g,
-                        (match, id, name) => `<img src="https://files.kick.com/emotes/${id}/fullsize" class="chat-emote" title="${name}">`
-                    );
-                },
-
-                formatTopList(arr, label = 'kez') {
-    if (!Array.isArray(arr) || !arr.length) return '';
-    return arr
-        .slice(0, 3)
-        .map(x => `${x.u} ${x.c} ${label}`)
-        .join(' • ');
-},
-
-                shuffle(arr) {
-                    return [...arr].sort(() => Math.random() - 0.5);
                 }
             },
 
-            mounted() {
-                fetch('site_data.json')
-                    .then(r => {
-                        if (!r.ok) throw new Error('site_data.json yüklenemedi');
-                        return r.json();
-                    })
-                    .then(data => {
-                        this.stats = data.stats || {};
-                        this.users = data.users || [];
-                        this.words = data.words || [];
-                        this.emotes = data.emotes || [];
-                        this.spam = data.spam || [];
-                        this.gameSpecial = data.game_special || {
-                            all_pool: [],
-                            top_5_users: [],
-                            top_5_words: [],
-                            top_5_emotes: []
-                        };
-                    })
-                    .catch(err => {
-                        console.error('Veri yükleme hatası:', err);
-                        alert('site_data.json okunamadı veya JSON yapısı hatalı.');
-                    });
+            async mounted() {
+                const saved = getFilterState();
+                this.filterMode = saved.mode || 'live';
+                this.selectedStreamId = saved.stream_id || '';
+                this.selectedDate = saved.date || this.selectedDate;
+                this.selectedMonth = saved.month || this.selectedMonth;
 
+                await this.fetchStreams();
+
+                if (this.filterMode === 'stream' && !this.selectedStreamId && this.streamOptions.length > 0) {
+                    this.selectedStreamId = String(this.streamOptions[0].id);
+                }
+
+                await this.fetchDashboardData();
+                this.setupAutoRefresh();
                 this.initLiveKickChat();
+
+                window.addEventListener('storage', async (event) => {
+                    if (event.key === 'rr_shared_filter_state_v1') {
+                        const saved = getFilterState();
+                        this.filterMode = saved.mode || 'live';
+                        this.selectedStreamId = saved.stream_id || '';
+                        this.selectedDate = saved.date || this.selectedDate;
+                        this.selectedMonth = saved.month || this.selectedMonth;
+
+                        await this.fetchStreams();
+                        await this.fetchDashboardData();
+                        this.setupAutoRefresh();
+                    }
+                });
+            },
+
+            beforeUnmount() {
+                try {
+                    if (this.socketRef) this.socketRef.close();
+                } catch (e) {}
+
+                if (this.autoRefreshTimer) {
+                    clearInterval(this.autoRefreshTimer);
+                }
             }
         }).mount('#app');
     </script>

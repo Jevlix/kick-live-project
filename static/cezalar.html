@@ -1,0 +1,877 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>RRaenee Ceza Sıralaması</title>
+
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/assets/css/style.css" />
+
+    <style>
+        .scroll-flat::-webkit-scrollbar { width: 5px; }
+        .scroll-flat::-webkit-scrollbar-track { background: transparent; }
+        .scroll-flat::-webkit-scrollbar-thumb { background: #fb923c; border-radius: 10px; }
+    </style>
+</head>
+<body class="bg-[#05070a] text-gray-100 font-['Inter']">
+    <div id="app" class="flex h-screen overflow-hidden">
+        <div v-html="sidebar" class="flex"></div>
+
+        <main class="flex-1 flex flex-col overflow-hidden relative">
+            <header class="p-8 pb-4 flex flex-col gap-6">
+                <div class="flex justify-between items-end gap-6 flex-wrap">
+                    <div>
+                        <h2 class="text-4xl font-black text-orange-400 uppercase tracking-tighter">Ceza Sıralaması</h2>
+                        <p class="text-gray-400 mt-1">
+                            Timeout, ban, unban ve silinen mesajlara göre kullanıcı ceza geçmişi
+                        </p>
+
+                        <div class="flex flex-wrap gap-2 mt-4">
+                            <div class="px-3 py-1.5 rounded-xl border border-orange-500/20 bg-orange-500/10 text-orange-300 text-xs font-bold uppercase tracking-wider">
+                                {{ currentLabel }}
+                            </div>
+
+                            <div
+                                class="px-3 py-1.5 rounded-xl border text-xs font-bold uppercase tracking-wider"
+                                :class="isLiveMode ? 'border-green-500/20 bg-green-500/10 text-green-300' : 'border-white/10 bg-white/5 text-gray-300'"
+                            >
+                                {{ isLiveMode ? 'Canlı Otomatik Yenileme Açık' : 'Statik Görünüm' }}
+                            </div>
+
+                            <div
+                                class="px-3 py-1.5 rounded-xl border text-xs font-bold uppercase tracking-wider"
+                                :class="socketConnected ? 'border-cyan-500/20 bg-cyan-500/10 text-cyan-300' : 'border-white/10 bg-white/5 text-gray-400'"
+                            >
+                                {{ socketConnected ? 'WS Bağlı' : 'WS Bekleniyor' }}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-4 gap-3 min-w-[700px]">
+                        <div class="bg-yellow-500/10 border border-yellow-500/20 px-5 py-4 rounded-2xl">
+                            <span class="text-yellow-400 font-bold block text-[11px] uppercase tracking-widest">Timeout Yiyen</span>
+                            <span class="text-2xl font-black text-white">{{ timeoutUsers.length }}</span>
+                        </div>
+
+                        <div class="bg-red-500/10 border border-red-500/20 px-5 py-4 rounded-2xl">
+                            <span class="text-red-400 font-bold block text-[11px] uppercase tracking-widest">Ban Yiyen</span>
+                            <span class="text-2xl font-black text-white">{{ banUsers.length }}</span>
+                        </div>
+
+                        <div class="bg-green-500/10 border border-green-500/20 px-5 py-4 rounded-2xl">
+                            <span class="text-green-400 font-bold block text-[11px] uppercase tracking-widest">Unban Alan</span>
+                            <span class="text-2xl font-black text-white">{{ unbanUsers.length }}</span>
+                        </div>
+
+                        <div class="bg-pink-500/10 border border-pink-500/20 px-5 py-4 rounded-2xl">
+                            <span class="text-pink-400 font-bold block text-[11px] uppercase tracking-widest">Mesajı Silinen</span>
+                            <span class="text-2xl font-black text-white">{{ deletedUsers.length }}</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div
+                    v-if="apiMeta.warning"
+                    class="rounded-2xl border border-yellow-500/20 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-300 font-bold"
+                >
+                    <i class="fa fa-triangle-exclamation mr-2"></i>
+                    {{ apiMeta.warning }}
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
+                    <div>
+                        <label class="block text-[10px] uppercase font-black opacity-50 mb-2">Veri Modu</label>
+                        <select v-model="currentFilter.mode" @change="handleModeChange" class="w-full bg-[#0b0f14] text-white border border-white/10 rounded-2xl px-4 py-3 text-sm font-black outline-none appearance-none">
+                            <option value="live">Canlı Yayın</option>
+                            <option value="offstream_live">Canlı Offstream</option>
+                            <option value="stream">Yayın Seç</option>
+                            <option value="day">Gün Seç</option>
+                            <option value="offstream_day">Offstream Gün</option>
+                            <option value="week">Son 7 Gün</option>
+                            <option value="month">Ay Seç</option>
+                            <option value="all">Tüm Zamanlar</option>
+                        </select>
+                    </div>
+
+                    <div v-if="currentFilter.mode === 'stream'">
+                        <label class="block text-[10px] uppercase font-black opacity-50 mb-2">Yayın</label>
+                        <select v-model="currentFilter.stream_id" @change="handleFilterChange" class="w-full bg-[#0b0f14] text-white border border-white/10 rounded-2xl px-4 py-3 text-sm font-black outline-none appearance-none">
+                            <option value="">Yayın seç</option>
+                            <option v-for="s in streamOptions" :key="String(s.id)" :value="String(s.id)">
+                                {{ formatStreamLabel(s) }}
+                            </option>
+                        </select>
+                    </div>
+
+                    <div v-if="currentFilter.mode === 'day' || currentFilter.mode === 'offstream_day'">
+                        <label class="block text-[10px] uppercase font-black opacity-50 mb-2">
+                            {{ currentFilter.mode === 'offstream_day' ? 'Offstream Gün' : 'Gün' }}
+                        </label>
+                        <input
+                            v-model="currentFilter.date"
+                            @change="handleFilterChange"
+                            type="date"
+                            class="w-full bg-[#0b0f14] text-white border border-white/10 rounded-2xl px-4 py-3 text-sm font-black outline-none"
+                        />
+                    </div>
+
+                    <div v-if="currentFilter.mode === 'month'">
+                        <label class="block text-[10px] uppercase font-black opacity-50 mb-2">Ay</label>
+                        <input
+                            v-model="currentFilter.month"
+                            @change="handleFilterChange"
+                            type="month"
+                            class="w-full bg-[#0b0f14] text-white border border-white/10 rounded-2xl px-4 py-3 text-sm font-black outline-none"
+                        />
+                    </div>
+
+                    <div class="xl:col-span-2">
+                        <label class="block text-[10px] uppercase font-black opacity-50 mb-2">Aktif Veri</label>
+                        <div class="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-sm font-black min-h-[50px] flex items-center">
+                            {{ currentLabel }}
+                        </div>
+                    </div>
+                </div>
+            </header>
+
+            <section class="px-8 pb-4">
+                <div class="max-w-7xl mx-auto bg-[#0d1117] border border-white/5 rounded-2xl p-4">
+                    <div class="grid grid-cols-1 xl:grid-cols-12 gap-3">
+                        <div class="xl:col-span-4">
+                            <label class="text-[11px] uppercase tracking-widest text-gray-500 font-black block mb-2">Kullanıcı Ara</label>
+                            <div class="relative">
+                                <i class="fa fa-search absolute left-4 top-1/2 -translate-y-1/2 text-gray-500"></i>
+                                <input
+                                    v-model.trim="search"
+                                    type="text"
+                                    placeholder="Kullanıcı adı ara..."
+                                    class="w-full bg-[#090c10] border border-white/10 rounded-2xl pl-11 pr-4 py-3 text-white outline-none focus:border-orange-500/40"
+                                />
+                            </div>
+                        </div>
+
+                        <div class="xl:col-span-2">
+                            <label class="text-[11px] uppercase tracking-widest text-gray-500 font-black block mb-2">Sıralama</label>
+                            <select
+                                v-model="sortBy"
+                                class="w-full bg-[#090c10] border border-white/10 rounded-2xl px-4 py-3 text-white outline-none focus:border-orange-500/40"
+                            >
+                                <option value="timeouts">Timeout</option>
+                                <option value="bans">Ban</option>
+                                <option value="unbans">Unban</option>
+                                <option value="deleted">Silinen Mesaj</option>
+                                <option value="total">Toplam Ceza</option>
+                                <option value="recent">Son Ceza</option>
+                                <option value="name">İsim</option>
+                            </select>
+                        </div>
+
+                        <div class="xl:col-span-3">
+                            <label class="text-[11px] uppercase tracking-widest text-gray-500 font-black block mb-2">Filtre Türü</label>
+                            <select
+                                v-model="penaltyFilter"
+                                class="w-full bg-[#090c10] border border-white/10 rounded-2xl px-4 py-3 text-white outline-none focus:border-orange-500/40"
+                            >
+                                <option value="all">Tümü</option>
+                                <option value="timeouts">Timeout Yiyenler</option>
+                                <option value="bans">Ban Yiyenler</option>
+                                <option value="unbans">Unban Alanlar</option>
+                                <option value="deleted">Mesajı Silinenler</option>
+                            </select>
+                        </div>
+
+                        <div class="xl:col-span-3">
+                            <label class="text-[11px] uppercase tracking-widest text-gray-500 font-black block mb-2">Filtreler</label>
+                            <div class="flex flex-wrap gap-2 h-[50px] items-center">
+                                <button
+                                    @click="excludeSystem = !excludeSystem"
+                                    class="px-3 py-2 rounded-xl border text-xs font-bold transition"
+                                    :class="excludeSystem ? 'bg-pink-500/10 text-pink-300 border-pink-500/20' : 'bg-white/5 text-gray-400 border-white/10'"
+                                >
+                                    System Hariç
+                                </button>
+
+                                <button
+                                    @click="excludeBotrix = !excludeBotrix"
+                                    class="px-3 py-2 rounded-xl border text-xs font-bold transition"
+                                    :class="excludeBotrix ? 'bg-cyan-500/10 text-cyan-300 border-cyan-500/20' : 'bg-white/5 text-gray-400 border-white/10'"
+                                >
+                                    BotRix Hariç
+                                </button>
+
+                                <button
+                                    @click="fetchPenaltyData(true)"
+                                    class="px-3 py-2 rounded-xl border border-orange-500/20 bg-orange-500/10 text-orange-300 text-xs font-bold transition hover:bg-orange-500/15"
+                                >
+                                    Yenile
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="flex flex-wrap items-center justify-between gap-3 mt-4 pt-4 border-t border-white/5 text-xs">
+                        <div class="text-gray-500">
+                            Son veri çekme:
+                            <span class="text-gray-300 font-semibold">{{ lastUpdatedText }}</span>
+                        </div>
+
+                        <div class="text-gray-500">
+                            Gösterilen:
+                            <span class="text-white font-black">{{ filteredUsers.length }}</span>
+                            /
+                            <span class="text-gray-300">{{ users.length }}</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="px-8 pb-4">
+                <div class="max-w-7xl mx-auto grid grid-cols-2 xl:grid-cols-5 gap-4">
+                    <div class="stat-card">
+                        <p class="opacity-50 text-xs font-bold mb-1 uppercase tracking-widest">Toplam Ceza</p>
+                        <h3 class="text-3xl font-black text-orange-400">{{ totalPenaltyCount }}</h3>
+                    </div>
+                    <div class="stat-card">
+                        <p class="opacity-50 text-xs font-bold mb-1 uppercase tracking-widest">Timeout</p>
+                        <h3 class="text-3xl font-black text-yellow-400">{{ totalTimeoutCount }}</h3>
+                    </div>
+                    <div class="stat-card">
+                        <p class="opacity-50 text-xs font-bold mb-1 uppercase tracking-widest">Ban</p>
+                        <h3 class="text-3xl font-black text-red-400">{{ totalBanCount }}</h3>
+                    </div>
+                    <div class="stat-card">
+                        <p class="opacity-50 text-xs font-bold mb-1 uppercase tracking-widest">Unban</p>
+                        <h3 class="text-3xl font-black text-green-400">{{ totalUnbanCount }}</h3>
+                    </div>
+                    <div class="stat-card">
+                        <p class="opacity-50 text-xs font-bold mb-1 uppercase tracking-widest">Silinen Mesaj</p>
+                        <h3 class="text-3xl font-black text-pink-400">{{ totalDeletedCount }}</h3>
+                    </div>
+                </div>
+            </section>
+
+            <section class="page-section flex-1 p-8 pt-0 scroll-flat overflow-y-auto">
+                <div class="max-w-7xl mx-auto">
+                    <div v-if="loading" class="bg-[#0f1218] border border-white/5 rounded-2xl p-8 text-center text-gray-400">
+                        <i class="fa fa-spinner fa-spin mr-2"></i> Ceza verileri yükleniyor...
+                    </div>
+
+                    <div v-else-if="error" class="bg-red-500/10 border border-red-500/20 rounded-2xl p-6 text-red-300">
+                        <div class="font-black uppercase tracking-wider mb-1">Veri Hatası</div>
+                        <div class="text-sm">{{ error }}</div>
+                    </div>
+
+                    <div v-else class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+                        <div class="stat-card">
+                            <h4 class="font-black text-xl italic flex items-center gap-2 mb-6">
+                                <div class="w-1 h-6 bg-orange-400"></div>
+                                CEZA LİSTESİ
+                            </h4>
+
+                            <div class="space-y-3 max-h-[800px] overflow-y-auto scroll-flat pr-2">
+                                <div
+                                    v-for="u in filteredUsers"
+                                    :key="u.n"
+                                    @click="selectedUser = u"
+                                    class="table-row p-4 cursor-pointer hover:border-orange-400 transition bg-white/5 rounded-2xl border border-white/5"
+                                >
+                                    <div class="flex justify-between items-start gap-4">
+                                        <div class="min-w-0 flex-1">
+                                            <div class="font-black text-lg break-all">{{ u.n }}</div>
+                                            <div class="text-[10px] uppercase tracking-widest text-gray-500 mt-1">
+                                                Son ceza: {{ formatEventDateTime(getLastPenaltyTime(u)) }}
+                                            </div>
+                                        </div>
+
+                                        <div class="text-right shrink-0">
+                                            <div class="text-2xl font-black text-orange-400">{{ getTotalPenaltyForUser(u) }}</div>
+                                            <div class="text-[10px] uppercase tracking-widest text-gray-500">Toplam</div>
+                                        </div>
+                                    </div>
+
+                                    <div class="grid grid-cols-4 gap-2 text-center text-[10px] font-black uppercase tracking-tighter mt-4">
+                                        <div class="bg-white/5 p-3 rounded-2xl border border-white/5">
+                                            <p class="text-yellow-400 text-lg">{{ u.mod_received?.timeouts || 0 }}</p>Timeout
+                                        </div>
+                                        <div class="bg-white/5 p-3 rounded-2xl border border-white/5">
+                                            <p class="text-red-400 text-lg">{{ u.mod_received?.bans || 0 }}</p>Ban
+                                        </div>
+                                        <div class="bg-white/5 p-3 rounded-2xl border border-white/5">
+                                            <p class="text-green-400 text-lg">{{ u.mod_received?.unbans || 0 }}</p>Unban
+                                        </div>
+                                        <div class="bg-white/5 p-3 rounded-2xl border border-white/5">
+                                            <p class="text-pink-400 text-lg">{{ u.mod_received?.deleted_messages || 0 }}</p>Silinen
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div v-if="!filteredUsers.length" class="opacity-40 text-sm">
+                                    Kullanıcı bulunamadı.
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="stat-card">
+                            <h4 class="font-black text-xl italic flex items-center gap-2 mb-6">
+                                <div class="w-1 h-6 bg-orange-400"></div>
+                                SON CEZA HAREKETLERİ
+                            </h4>
+
+                            <div class="space-y-3 max-h-[800px] overflow-y-auto scroll-flat pr-2">
+                                <div
+                                    v-for="(action, idx) in recentPenaltyActions"
+                                    :key="action.key || idx"
+                                    class="p-4 rounded-[20px] bg-white/5 border border-white/5"
+                                >
+                                    <div class="flex justify-between items-center gap-3 mb-2">
+                                        <span class="font-black" :class="getActionColor(action.action)">
+                                            {{ (action.action || '-').toUpperCase() }}
+                                        </span>
+                                        <span class="opacity-30 text-[10px] font-mono">{{ formatEventDateTime(action.t) }}</span>
+                                    </div>
+
+                                    <p class="text-sm">
+                                        <span class="font-black">{{ action.target || 'Bilinmiyor' }}</span>
+                                        <span class="opacity-60">←</span>
+                                        <span class="text-cyan-400 font-black">{{ action.mod || 'Unknown Mod' }}</span>
+                                    </p>
+
+                                    <p v-if="action.reason" class="text-xs opacity-60 mt-2">Sebep: {{ action.reason }}</p>
+                                    <p v-if="action.duration" class="text-xs opacity-60 mt-1">Süre: {{ action.duration }}</p>
+                                    <div v-if="action.msg" class="text-xs opacity-80 mt-2 break-words" v-html="renderMessage(action.msg)"></div>
+                                </div>
+
+                                <div v-if="!recentPenaltyActions.length" class="opacity-40 text-sm">
+                                    Ceza hareketi bulunamadı.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <transition name="modal">
+            <div v-if="selectedUser" class="fixed inset-0 flex justify-end z-[1000]">
+                <div @click="selectedUser = null" class="absolute inset-0 bg-black/80 backdrop-blur-md"></div>
+
+                <div class="w-full max-w-4xl glass h-full shadow-2xl flex flex-col z-10 border-l border-white/10 text-white">
+                    <div class="p-10 border-b border-white/5">
+                        <div class="flex justify-between items-start gap-4">
+                            <div class="flex-1 min-w-0">
+                                <span class="text-orange-400 font-black text-xs uppercase italic">Ceza Detayı</span>
+                                <h2 class="text-4xl md:text-6xl font-black mt-2 italic uppercase tracking-tighter break-all">{{ selectedUser.n }}</h2>
+                            </div>
+
+                            <button @click="selectedUser = null" class="text-5xl hover:text-red-500 transition leading-none ml-4">&times;</button>
+                        </div>
+
+                        <div class="grid grid-cols-4 gap-4 mt-8 text-center text-[10px] font-black uppercase tracking-tighter">
+                            <div class="bg-white/5 p-4 rounded-3xl border border-white/5">
+                                <p class="text-yellow-400 text-2xl">{{ selectedUser.mod_received?.timeouts || 0 }}</p>Timeout
+                            </div>
+                            <div class="bg-white/5 p-4 rounded-3xl border border-white/5">
+                                <p class="text-red-400 text-2xl">{{ selectedUser.mod_received?.bans || 0 }}</p>Ban
+                            </div>
+                            <div class="bg-white/5 p-4 rounded-3xl border border-white/5">
+                                <p class="text-green-400 text-2xl">{{ selectedUser.mod_received?.unbans || 0 }}</p>Unban
+                            </div>
+                            <div class="bg-white/5 p-4 rounded-3xl border border-white/5">
+                                <p class="text-pink-400 text-2xl">{{ selectedUser.mod_received?.deleted_messages || 0 }}</p>Silinen Mesaj
+                            </div>
+                        </div>
+
+                        <div class="mt-8 bg-white/5 p-4 rounded-3xl border border-white/5">
+                            <p class="text-[10px] font-black text-orange-400 uppercase mb-3">Özet</p>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                                <div>
+                                    Toplam ceza:
+                                    <span class="font-black">{{ getTotalPenaltyForUser(selectedUser) }}</span>
+                                </div>
+                                <div>
+                                    Son ceza:
+                                    <span class="font-black">{{ formatEventDateTime(getLastPenaltyTime(selectedUser)) }}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="flex-1 overflow-y-auto p-10 bg-black/30 space-y-4 scroll-flat">
+                        <p class="text-[10px] font-black opacity-30 uppercase italic">Ceza Geçmişi</p>
+
+                        <div
+                            v-for="(log, i) in getUserHistory(selectedUser)"
+                            :key="i"
+                            class="p-6 rounded-[24px] bg-white/5 border-l-4 border-orange-400 text-sm"
+                        >
+                            <div class="flex justify-between items-center gap-3 mb-3">
+                                <span class="font-black text-base" :class="getActionColor(log.action)">
+                                    {{ (log.action || '-').toUpperCase() }}
+                                </span>
+                                <span class="opacity-30 text-[11px] font-mono">{{ formatEventDateTime(log.t) }}</span>
+                            </div>
+
+                            <p class="text-base">
+                                Mod:
+                                <span class="font-black text-cyan-400">{{ log.mod || 'Unknown Mod' }}</span>
+                            </p>
+
+                            <p v-if="log.duration" class="text-sm opacity-70 mt-2">Süre: {{ log.duration }}</p>
+                            <p v-if="log.reason" class="text-sm opacity-70 mt-2">Sebep: {{ log.reason }}</p>
+                            <div v-if="log.msg" class="text-sm opacity-80 mt-3 break-words" v-html="renderMessage(log.msg)"></div>
+                        </div>
+
+                        <div v-if="!getUserHistory(selectedUser).length" class="opacity-40 text-sm">
+                            Ceza geçmişi bulunamadı.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </transition>
+    </div>
+
+    <script src="/assets/js/common.js"></script>
+    <script>
+        const { createApp } = Vue;
+
+        createApp({
+            data() {
+                return {
+                    sidebar: sidebarHtml('cezalar'),
+
+                    users: [],
+                    moderation: { summary: {}, mods: [], recent_actions: [] },
+
+                    search: '',
+                    selectedUser: null,
+                    sortBy: 'timeouts',
+                    penaltyFilter: 'all',
+                    excludeSystem: true,
+                    excludeBotrix: true,
+
+                    loading: true,
+                    error: '',
+                    currentFilter: getFilterState(),
+                    apiMeta: {},
+                    streamOptions: [],
+                    lastUpdatedAt: null,
+
+                    refreshTimer: null,
+                    refreshDebounce: null,
+                    socketRef: null,
+                    socketConnected: false
+                };
+            },
+
+            computed: {
+                currentLabel() {
+                    const selectedStream =
+                        this.currentFilter?.mode === 'stream'
+                            ? this.streamOptions.find(s => String(s.id) === String(this.currentFilter.stream_id))
+                            : null;
+
+                    return getReadableFilterLabel(this.currentFilter, this.apiMeta, selectedStream);
+                },
+
+                isLiveMode() {
+                    const mode = this.currentFilter?.mode || 'live';
+                    return mode === 'live' || mode === 'offstream_live';
+                },
+
+                timeoutUsers() {
+                    return this.users
+                        .filter(u => (u.mod_received?.timeouts || 0) > 0)
+                        .sort((a, b) => (b.mod_received?.timeouts || 0) - (a.mod_received?.timeouts || 0));
+                },
+
+                banUsers() {
+                    return this.users
+                        .filter(u => (u.mod_received?.bans || 0) > 0)
+                        .sort((a, b) => (b.mod_received?.bans || 0) - (a.mod_received?.bans || 0));
+                },
+
+                unbanUsers() {
+                    return this.users
+                        .filter(u => (u.mod_received?.unbans || 0) > 0)
+                        .sort((a, b) => (b.mod_received?.unbans || 0) - (a.mod_received?.unbans || 0));
+                },
+
+                deletedUsers() {
+                    return this.users
+                        .filter(u => (u.mod_received?.deleted_messages || 0) > 0)
+                        .sort((a, b) => (b.mod_received?.deleted_messages || 0) - (a.mod_received?.deleted_messages || 0));
+                },
+
+                filteredUsers() {
+                    const q = String(this.search || '').toLowerCase().trim();
+
+                    let list = this.users.filter(u => {
+                        const name = String(u.n || '').toLowerCase();
+                        if (q && !name.includes(q)) return false;
+
+                        if (this.penaltyFilter === 'timeouts') return (u.mod_received?.timeouts || 0) > 0;
+                        if (this.penaltyFilter === 'bans') return (u.mod_received?.bans || 0) > 0;
+                        if (this.penaltyFilter === 'unbans') return (u.mod_received?.unbans || 0) > 0;
+                        if (this.penaltyFilter === 'deleted') return (u.mod_received?.deleted_messages || 0) > 0;
+
+                        return this.getTotalPenaltyForUser(u) > 0;
+                    });
+
+                    if (this.sortBy === 'timeouts') {
+                        list.sort((a, b) => (b.mod_received?.timeouts || 0) - (a.mod_received?.timeouts || 0));
+                    } else if (this.sortBy === 'bans') {
+                        list.sort((a, b) => (b.mod_received?.bans || 0) - (a.mod_received?.bans || 0));
+                    } else if (this.sortBy === 'unbans') {
+                        list.sort((a, b) => (b.mod_received?.unbans || 0) - (a.mod_received?.unbans || 0));
+                    } else if (this.sortBy === 'deleted') {
+                        list.sort((a, b) => (b.mod_received?.deleted_messages || 0) - (a.mod_received?.deleted_messages || 0));
+                    } else if (this.sortBy === 'total') {
+                        list.sort((a, b) => this.getTotalPenaltyForUser(b) - this.getTotalPenaltyForUser(a));
+                    } else if (this.sortBy === 'recent') {
+                        list.sort((a, b) => new Date(this.getLastPenaltyTime(b) || 0) - new Date(this.getLastPenaltyTime(a) || 0));
+                    } else if (this.sortBy === 'name') {
+                        list.sort((a, b) => String(a.n || '').localeCompare(String(b.n || ''), 'tr'));
+                    }
+
+                    return list.slice(0, 150);
+                },
+
+                recentPenaltyActions() {
+                    let list = Array.isArray(this.moderation?.recent_actions) ? [...this.moderation.recent_actions] : [];
+
+                    list = list.filter(action => {
+                        const target = String(action.target || '').toLowerCase();
+                        const mod = String(action.mod || '').toLowerCase();
+                        const q = String(this.search || '').toLowerCase().trim();
+                        const actionType = String(action.action || '').toLowerCase();
+
+                        if (q && !target.includes(q) && !mod.includes(q)) return false;
+
+                        if (this.penaltyFilter === 'timeouts') return actionType === 'timeout';
+                        if (this.penaltyFilter === 'bans') return actionType === 'ban';
+                        if (this.penaltyFilter === 'unbans') return actionType === 'unban';
+                        if (this.penaltyFilter === 'deleted') return actionType === 'deleted_message' || actionType === 'delete' || actionType === 'deleted';
+
+                        return true;
+                    });
+
+                    return list
+                        .sort((a, b) => new Date(b.t || 0) - new Date(a.t || 0))
+                        .slice(0, 120);
+                },
+
+                totalPenaltyCount() {
+                    return this.filteredUsers.reduce((sum, u) => sum + this.getTotalPenaltyForUser(u), 0);
+                },
+
+                totalTimeoutCount() {
+                    return this.filteredUsers.reduce((sum, u) => sum + (u.mod_received?.timeouts || 0), 0);
+                },
+
+                totalBanCount() {
+                    return this.filteredUsers.reduce((sum, u) => sum + (u.mod_received?.bans || 0), 0);
+                },
+
+                totalUnbanCount() {
+                    return this.filteredUsers.reduce((sum, u) => sum + (u.mod_received?.unbans || 0), 0);
+                },
+
+                totalDeletedCount() {
+                    return this.filteredUsers.reduce((sum, u) => sum + (u.mod_received?.deleted_messages || 0), 0);
+                },
+
+                lastUpdatedText() {
+                    if (!this.lastUpdatedAt) return '-';
+
+                    try {
+                        return new Date(this.lastUpdatedAt).toLocaleString('tr-TR');
+                    } catch (e) {
+                        return this.lastUpdatedAt;
+                    }
+                }
+            },
+
+            methods: {
+                getActionColor,
+
+                isKickEmoteWord(word) {
+                    return /emote\d+[a-zA-Z]*/i.test(String(word || '').trim());
+                },
+
+                getKickEmoteId(word) {
+                    const match = String(word || '').trim().match(/emote(\d+)/i);
+                    return match ? match[1] : null;
+                },
+
+                getRemainingTextAfterEmote(word) {
+                    return String(word || '')
+                        .replace(/emote\d+[a-zA-Z]*/ig, '')
+                        .trim();
+                },
+
+                escapeHtml(text) {
+                    return String(text || '')
+                        .replace(/&/g, '&amp;')
+                        .replace(/</g, '&lt;')
+                        .replace(/>/g, '&gt;')
+                        .replace(/"/g, '&quot;')
+                        .replace(/'/g, '&#39;');
+                },
+
+                renderMessage(message) {
+                    const base = typeof parseMessage === 'function'
+                        ? String(parseMessage(message || ''))
+                        : this.escapeHtml(message || '');
+
+                    return base.replace(/emote(\d+)[a-zA-Z]*/ig, (_, id) => {
+                        return `<img src="https://files.kick.com/emotes/${id}/fullsize" alt="emote${id}" class="inline-block h-7 w-7 object-contain align-middle mx-0.5">`;
+                    });
+                },
+
+                formatEventDateTime(value) {
+                    if (!value) return '-';
+
+                    try {
+                        return new Date(value).toLocaleString('tr-TR');
+                    } catch (e) {
+                        return String(value);
+                    }
+                },
+
+                formatStreamLabel(stream) {
+                    if (!stream) return 'Yayın seç';
+
+                    if (stream.display_label) return stream.display_label;
+
+                    if (stream.label_date) {
+                        const suffix = stream.session_type === 'offstream' ? 'offstream' : 'yayını';
+                        return `${formatHumanDate(stream.label_date)} ${suffix}`;
+                    }
+
+                    const date = stream.started_at
+                        ? new Date(stream.started_at).toLocaleDateString('tr-TR')
+                        : '-';
+
+                    const started = stream.started_at
+                        ? new Date(stream.started_at).toLocaleTimeString('tr-TR', {
+                            hour: '2-digit',
+                            minute: '2-digit'
+                        })
+                        : '--:--';
+
+                    return `${date} · ${started}`;
+                },
+
+                syncFilterState() {
+                    this.currentFilter = setFilterState(this.currentFilter);
+                },
+
+                isFilteredUser(username) {
+                    const u = String(username || '').toLowerCase().trim();
+
+                    if (!u) return false;
+                    if (this.excludeSystem && (u === 'system' || u === 'kick system' || u === 'bot')) return true;
+                    if (this.excludeBotrix && u.includes('botrix')) return true;
+
+                    return false;
+                },
+
+                getTotalPenaltyForUser(user) {
+                    return (
+                        (user?.mod_received?.timeouts || 0) +
+                        (user?.mod_received?.bans || 0) +
+                        (user?.mod_received?.unbans || 0) +
+                        (user?.mod_received?.deleted_messages || 0)
+                    );
+                },
+
+                getLastPenaltyTime(user) {
+                    const logs = Array.isArray(user?.mod_history_received) ? user.mod_history_received : [];
+                    if (!logs.length) return null;
+
+                    const sorted = [...logs].sort((a, b) => new Date(b.t || 0) - new Date(a.t || 0));
+                    return sorted[0]?.t || null;
+                },
+
+                getUserHistory(user) {
+                    const logs = Array.isArray(user?.mod_history_received) ? [...user.mod_history_received] : [];
+                    return logs.sort((a, b) => new Date(b.t || 0) - new Date(a.t || 0));
+                },
+
+                filterUsers(rawUsers) {
+                    return (rawUsers || []).filter(u => !this.isFilteredUser(u.n));
+                },
+
+                async fetchStreamsForSelect() {
+                    try {
+                        this.streamOptions = await fetchStreams(100);
+
+                        if (this.currentFilter.mode === 'stream' && !this.currentFilter.stream_id && this.streamOptions.length > 0) {
+                            this.currentFilter.stream_id = String(this.streamOptions[0].id);
+                            this.syncFilterState();
+                        }
+                    } catch (err) {
+                        console.error('stream listesi alınamadı', err);
+                    }
+                },
+
+                async fetchPenaltyData(showLoader = false) {
+                    if (showLoader) this.loading = true;
+                    this.error = '';
+
+                    try {
+                        this.syncFilterState();
+
+                        const result = await loadDashboardData(this.currentFilter);
+                        this.currentFilter = result.filter || this.currentFilter || getFilterState();
+                        this.apiMeta = result.apiData?.meta || {};
+
+                        const rawUsers = result.transformed?.users || [];
+                        this.users = this.filterUsers(rawUsers);
+                        this.moderation = result.transformed?.moderation || { summary: {}, mods: [], recent_actions: [] };
+                        this.lastUpdatedAt = new Date().toISOString();
+
+                        if (this.selectedUser) {
+                            const found = this.users.find(u => u.n === this.selectedUser.n);
+                            this.selectedUser = found || null;
+                        }
+                    } catch (err) {
+                        console.error('Ceza verisi yüklenemedi:', err);
+                        this.error = err?.message || 'Ceza verileri alınamadı.';
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                async handleModeChange() {
+                    if (this.currentFilter.mode === 'stream') {
+                        if (!this.currentFilter.stream_id && this.streamOptions.length > 0) {
+                            this.currentFilter.stream_id = String(this.streamOptions[0].id);
+                        }
+                    }
+
+                    if (this.currentFilter.mode !== 'stream') {
+                        this.currentFilter.stream_id = this.currentFilter.stream_id || '';
+                    }
+
+                    await this.handleFilterChange();
+                },
+
+                async handleFilterChange() {
+                    if (this.currentFilter.mode === 'stream' && !this.currentFilter.stream_id && this.streamOptions.length > 0) {
+                        this.currentFilter.stream_id = String(this.streamOptions[0].id);
+                    }
+
+                    this.syncFilterState();
+                    await this.fetchPenaltyData(true);
+                    this.startAutoRefresh();
+                },
+
+                startAutoRefresh() {
+                    this.stopAutoRefresh();
+
+                    if (!this.isLiveMode) return;
+
+                    this.refreshTimer = setInterval(() => {
+                        this.fetchPenaltyData(false);
+                    }, 10000);
+                },
+
+                stopAutoRefresh() {
+                    if (this.refreshTimer) {
+                        clearInterval(this.refreshTimer);
+                        this.refreshTimer = null;
+                    }
+                },
+
+                scheduleRefreshFromSocket() {
+                    if (!this.isLiveMode) return;
+
+                    if (this.refreshDebounce) {
+                        clearTimeout(this.refreshDebounce);
+                    }
+
+                    this.refreshDebounce = setTimeout(() => {
+                        this.fetchPenaltyData(false);
+                    }, 1200);
+                },
+
+                initWebSocket() {
+                    try {
+                        const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+                        this.socketRef = new WebSocket(`${protocol}//${location.host}/ws`);
+
+                        this.socketRef.onopen = () => {
+                            this.socketConnected = true;
+                        };
+
+                        this.socketRef.onclose = () => {
+                            this.socketConnected = false;
+
+                            setTimeout(() => {
+                                this.initWebSocket();
+                            }, 5000);
+                        };
+
+                        this.socketRef.onerror = () => {
+                            this.socketConnected = false;
+                        };
+
+                        this.socketRef.onmessage = (event) => {
+                            try {
+                                const data = JSON.parse(event.data);
+
+                                if (!this.isLiveMode) return;
+
+                                if (data.type === 'moderation' || data.type === 'system' || data.type === 'other' || data.type === 'bootstrap' || data.type === 'chat') {
+                                    this.scheduleRefreshFromSocket();
+                                }
+                            } catch (e) {
+                                console.error('WS parse hatası:', e);
+                            }
+                        };
+                    } catch (e) {
+                        console.error('WS başlatılamadı:', e);
+                        this.socketConnected = false;
+                    }
+                }
+            },
+
+            async mounted() {
+                await this.fetchStreamsForSelect();
+                await this.fetchPenaltyData(true);
+                this.startAutoRefresh();
+                this.initWebSocket();
+
+                window.addEventListener('storage', async (event) => {
+                    if (event.key === 'rr_shared_filter_state_v1') {
+                        this.currentFilter = getFilterState();
+                        await this.fetchStreamsForSelect();
+                        await this.fetchPenaltyData(true);
+                        this.startAutoRefresh();
+                    }
+                });
+            },
+
+            beforeUnmount() {
+                this.stopAutoRefresh();
+
+                if (this.refreshDebounce) {
+                    clearTimeout(this.refreshDebounce);
+                    this.refreshDebounce = null;
+                }
+
+                if (this.socketRef) {
+                    try {
+                        this.socketRef.close();
+                    } catch (e) {}
+                }
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
