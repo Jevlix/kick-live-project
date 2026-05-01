@@ -159,7 +159,7 @@ class KickRecorder:
             return {
                 "stream_id": active["id"],
                 "stream_label_date": active["label_date"],
-                "session_type": active.get("session_type", "stream") or "stream",
+                "session_type": active["session_type"] if active["session_type"] else "stream",
             }
 
         now_ts = asyncio.get_running_loop().time()
@@ -174,7 +174,7 @@ class KickRecorder:
             return {
                 "stream_id": active["id"],
                 "stream_label_date": active["label_date"],
-                "session_type": active.get("session_type", "stream") or "stream",
+                "session_type": active["session_type"] if active["session_type"] else "stream",
             }
 
         offstream_id = await asyncio.to_thread(

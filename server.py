@@ -1,8 +1,10 @@
 import asyncio
 import json
 import sqlite3
+import os
 from datetime import datetime
 from typing import Set, Optional
+from pathlib import Path
 
 import websockets
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query
@@ -55,18 +57,9 @@ def format_human_date(date_str: Optional[str]) -> str:
     try:
         dt = datetime.strptime(date_str, "%Y-%m-%d")
         months = {
-            1: "Ocak",
-            2: "Şubat",
-            3: "Mart",
-            4: "Nisan",
-            5: "Mayıs",
-            6: "Haziran",
-            7: "Temmuz",
-            8: "Ağustos",
-            9: "Eylül",
-            10: "Ekim",
-            11: "Kasım",
-            12: "Aralık",
+            1: "Ocak", 2: "Şubat", 3: "Mart", 4: "Nisan",
+            5: "Mayıs", 6: "Haziran", 7: "Temmuz", 8: "Ağustos",
+            9: "Eylül", 10: "Ekim", 11: "Kasım", 12: "Aralık",
         }
         return f"{dt.day} {months[dt.month]}"
     except Exception:
@@ -89,15 +82,9 @@ def build_stream_label(stream_row):
 
 def build_summary_from_events(events):
     stats = {
-        "total_messages": 0,
-        "unique_users": 0,
-        "deleted_messages": 0,
-        "timeouts": 0,
-        "bans": 0,
-        "unbans": 0,
-        "subscriptions": 0,
-        "gift_subscriptions": 0,
-        "other_events": 0,
+        "total_messages": 0, "unique_users": 0, "deleted_messages": 0,
+        "timeouts": 0, "bans": 0, "unbans": 0, "subscriptions": 0,
+        "gift_subscriptions": 0, "other_events": 0,
     }
 
     users_map = {}
@@ -123,113 +110,61 @@ def build_summary_from_events(events):
         if username:
             if username not in users_map:
                 users_map[username] = {
-                    "n": username,
-                    "mc": 0,
-                    "mod_received": {
-                        "timeouts": 0,
-                        "bans": 0,
-                        "unbans": 0,
-                        "deleted_messages": 0
-                    },
+                    "n": username, "mc": 0,
+                    "mod_received": {"timeouts": 0, "bans": 0, "unbans": 0, "deleted_messages": 0},
                     "mod_history_received": []
                 }
 
         if event_type == "chat":
             stats["total_messages"] += 1
-
-            if username:
-                users_map[username]["mc"] += 1
+            if username: users_map[username]["mc"] += 1
 
             if message:
-                # kelimeler
                 for raw_word in str(message).split():
                     word = normalize_word(raw_word)
-                    if not word:
-                        continue
-
+                    if not word: continue
                     if word not in words_map:
-                        words_map[word] = {
-                            "w": word,
-                            "c": 0,
-                            "top_user_map": {}
-                        }
-
+                        words_map[word] = {"w": word, "c": 0, "top_user_map": {}}
                     words_map[word]["c"] += 1
                     if username:
                         words_map[word]["top_user_map"][username] = words_map[word]["top_user_map"].get(username, 0) + 1
 
-                # emotes
-                
                 emote_matches = re.findall(r"\[emote:(\d+):([^\]]+)\]", str(message))
                 for emote_id, emote_name in emote_matches:
                     key = f"{emote_id}:{emote_name}"
                     if key not in emotes_map:
-                        emotes_map[key] = {
-                            "id": emote_id,
-                            "n": emote_name,
-                            "c": 0,
-                            "unique_users_set": set(),
-                            "top_user_map": {}
-                        }
-
+                        emotes_map[key] = {"id": emote_id, "n": emote_name, "c": 0, "unique_users_set": set(), "top_user_map": {}}
                     emotes_map[key]["c"] += 1
                     if username:
                         emotes_map[key]["unique_users_set"].add(username)
                         emotes_map[key]["top_user_map"][username] = emotes_map[key]["top_user_map"].get(username, 0) + 1
 
-                # basit spam tekrar algısı
                 if username:
                     prev = user_message_cache.get(username)
                     if prev and prev == message:
                         key = str(message).strip().lower()
                         if key:
                             if key not in spam_map:
-                                spam_map[key] = {
-                                    "key": key,
-                                    "m": message,
-                                    "c": 0,
-                                    "top_user_map": {}
-                                }
+                                spam_map[key] = {"key": key, "m": message, "c": 0, "top_user_map": {}}
                             spam_map[key]["c"] += 1
                             spam_map[key]["top_user_map"][username] = spam_map[key]["top_user_map"].get(username, 0) + 1
-
                     user_message_cache[username] = message
 
         elif event_type == "deleted":
             stats["deleted_messages"] += 1
-
             if target_username and target_username not in users_map:
                 users_map[target_username] = {
-                    "n": target_username,
-                    "mc": 0,
-                    "mod_received": {
-                        "timeouts": 0,
-                        "bans": 0,
-                        "unbans": 0,
-                        "deleted_messages": 0
-                    },
+                    "n": target_username, "mc": 0,
+                    "mod_received": {"timeouts": 0, "bans": 0, "unbans": 0, "deleted_messages": 0},
                     "mod_history_received": []
                 }
-
             if target_username:
                 users_map[target_username]["mod_received"]["deleted_messages"] += 1
                 users_map[target_username]["mod_history_received"].append({
-                    "action": "deleted",
-                    "mod": moderator,
-                    "reason": reason,
-                    "duration": duration,
-                    "msg": message,
-                    "t": timestamp
+                    "action": "deleted", "mod": moderator, "reason": reason, "duration": duration, "msg": message, "t": timestamp
                 })
-
             moderation_actions.append({
-                "action": "deleted",
-                "mod": moderator,
-                "target": target_username,
-                "reason": reason,
-                "duration": duration,
-                "msg": message,
-                "t": timestamp
+                "action": "deleted", "mod": moderator, "target": target_username, "reason": reason, "duration": duration, "msg": message, "t": timestamp
             })
 
         elif event_type == "ban":
@@ -242,77 +177,35 @@ def build_summary_from_events(events):
 
             if target_username and target_username not in users_map:
                 users_map[target_username] = {
-                    "n": target_username,
-                    "mc": 0,
-                    "mod_received": {
-                        "timeouts": 0,
-                        "bans": 0,
-                        "unbans": 0,
-                        "deleted_messages": 0
-                    },
+                    "n": target_username, "mc": 0,
+                    "mod_received": {"timeouts": 0, "bans": 0, "unbans": 0, "deleted_messages": 0},
                     "mod_history_received": []
                 }
-
             if target_username:
-                if mod_action == "ban":
-                    users_map[target_username]["mod_received"]["bans"] += 1
-                else:
-                    users_map[target_username]["mod_received"]["timeouts"] += 1
-
+                if mod_action == "ban": users_map[target_username]["mod_received"]["bans"] += 1
+                else: users_map[target_username]["mod_received"]["timeouts"] += 1
                 users_map[target_username]["mod_history_received"].append({
-                    "action": mod_action,
-                    "mod": moderator,
-                    "reason": reason,
-                    "duration": duration,
-                    "msg": message,
-                    "t": timestamp
+                    "action": mod_action, "mod": moderator, "reason": reason, "duration": duration, "msg": message, "t": timestamp
                 })
-
             moderation_actions.append({
-                "action": mod_action,
-                "mod": moderator,
-                "target": target_username,
-                "reason": reason,
-                "duration": duration,
-                "msg": message,
-                "t": timestamp
+                "action": mod_action, "mod": moderator, "target": target_username, "reason": reason, "duration": duration, "msg": message, "t": timestamp
             })
 
         elif event_type == "unban":
             stats["unbans"] += 1
-
             if target_username and target_username not in users_map:
                 users_map[target_username] = {
-                    "n": target_username,
-                    "mc": 0,
-                    "mod_received": {
-                        "timeouts": 0,
-                        "bans": 0,
-                        "unbans": 0,
-                        "deleted_messages": 0
-                    },
+                    "n": target_username, "mc": 0,
+                    "mod_received": {"timeouts": 0, "bans": 0, "unbans": 0, "deleted_messages": 0},
                     "mod_history_received": []
                 }
-
             if target_username:
                 users_map[target_username]["mod_received"]["unbans"] += 1
                 users_map[target_username]["mod_history_received"].append({
-                    "action": "unban",
-                    "mod": moderator,
-                    "reason": reason,
-                    "duration": duration,
-                    "msg": message,
-                    "t": timestamp
+                    "action": "unban", "mod": moderator, "reason": reason, "duration": duration, "msg": message, "t": timestamp
                 })
-
             moderation_actions.append({
-                "action": "unban",
-                "mod": moderator,
-                "target": target_username,
-                "reason": reason,
-                "duration": duration,
-                "msg": message,
-                "t": timestamp
+                "action": "unban", "mod": moderator, "target": target_username, "reason": reason, "duration": duration, "msg": message, "t": timestamp
             })
 
         elif event_type == "subscription":
@@ -325,115 +218,50 @@ def build_summary_from_events(events):
             stats["other_events"] += 1
 
         events_out.append({
-            "id": row["id"],
-            "stream_id": row["stream_id"],
-            "timestamp": row["timestamp"],
-            "event_name": row["event_name"],
-            "event_type": row["event_type"],
-            "username": row["username"],
-            "target_username": row["target_username"],
-            "moderator": row["moderator"],
-            "message": row["message"],
-            "reason": row["reason"],
-            "duration": row["duration"],
-            "permanent": row["permanent"],
-            "session_type": session_type,
+            "id": row["id"], "stream_id": row["stream_id"], "timestamp": row["timestamp"], "event_name": row["event_name"],
+            "event_type": row["event_type"], "username": row["username"], "target_username": row["target_username"],
+            "moderator": row["moderator"], "message": row["message"], "reason": row["reason"], "duration": row["duration"],
+            "permanent": row["permanent"], "session_type": session_type,
         })
 
     stats["unique_users"] = len(users_map)
-
     users = sorted(users_map.values(), key=lambda x: x["mc"], reverse=True)
 
     words = []
     for word_data in words_map.values():
-        top = sorted(
-            [{"u": u, "c": c} for u, c in word_data["top_user_map"].items()],
-            key=lambda x: x["c"],
-            reverse=True
-        )[:5]
-
-        words.append({
-            "w": word_data["w"],
-            "c": word_data["c"],
-            "top": top
-        })
-
+        top = sorted([{"u": u, "c": c} for u, c in word_data["top_user_map"].items()], key=lambda x: x["c"], reverse=True)[:5]
+        words.append({"w": word_data["w"], "c": word_data["c"], "top": top})
     words.sort(key=lambda x: x["c"], reverse=True)
-    
 
     emotes = []
     for emote_data in emotes_map.values():
-        top = sorted(
-            [{"u": u, "c": c} for u, c in emote_data["top_user_map"].items()],
-            key=lambda x: x["c"],
-            reverse=True
-        )[:5]
-
-        emotes.append({
-            "id": emote_data["id"],
-            "n": emote_data["n"],
-            "c": emote_data["c"],
-            "unique_users": len(emote_data["unique_users_set"]),
-            "top": top
-        })
-
+        top = sorted([{"u": u, "c": c} for u, c in emote_data["top_user_map"].items()], key=lambda x: x["c"], reverse=True)[:5]
+        emotes.append({"id": emote_data["id"], "n": emote_data["n"], "c": emote_data["c"], "unique_users": len(emote_data["unique_users_set"]), "top": top})
     emotes.sort(key=lambda x: x["c"], reverse=True)
 
     spam = []
     for spam_data in spam_map.values():
-        if spam_data["c"] < 2:
-            continue
-
-        top = sorted(
-            [{"u": u, "c": c} for u, c in spam_data["top_user_map"].items()],
-            key=lambda x: x["c"],
-            reverse=True
-        )[:10]
-
-        spam.append({
-            "key": spam_data["key"],
-            "m": spam_data["m"],
-            "c": spam_data["c"],
-            "top": top
-        })
-
+        if spam_data["c"] < 2: continue
+        top = sorted([{"u": u, "c": c} for u, c in spam_data["top_user_map"].items()], key=lambda x: x["c"], reverse=True)[:10]
+        spam.append({"key": spam_data["key"], "m": spam_data["m"], "c": spam_data["c"], "top": top})
     spam.sort(key=lambda x: x["c"], reverse=True)
-    spam = spam
 
     mods_map = {}
     for action in moderation_actions:
         mod_name = action["mod"] or "Unknown Mod"
         if mod_name not in mods_map:
-            mods_map[mod_name] = {
-                "n": mod_name,
-                "total_actions": 0,
-                "timeouts": 0,
-                "bans": 0,
-                "unbans": 0,
-                "deleted_messages": 0,
-                "logs": [],
-                "top_targets_map": {},
-                "top_reasons_map": {},
-                "last_action_at": None
-            }
+            mods_map[mod_name] = {"n": mod_name, "total_actions": 0, "timeouts": 0, "bans": 0, "unbans": 0, "deleted_messages": 0, "logs": [], "top_targets_map": {}, "top_reasons_map": {}, "last_action_at": None}
 
         mod = mods_map[mod_name]
         mod["total_actions"] += 1
 
-        if action["action"] == "timeout":
-            mod["timeouts"] += 1
-        elif action["action"] == "ban":
-            mod["bans"] += 1
-        elif action["action"] == "unban":
-            mod["unbans"] += 1
-        elif action["action"] == "deleted":
-            mod["deleted_messages"] += 1
+        if action["action"] == "timeout": mod["timeouts"] += 1
+        elif action["action"] == "ban": mod["bans"] += 1
+        elif action["action"] == "unban": mod["unbans"] += 1
+        elif action["action"] == "deleted": mod["deleted_messages"] += 1
 
-        if action["target"]:
-            mod["top_targets_map"][action["target"]] = mod["top_targets_map"].get(action["target"], 0) + 1
-
-        if action["reason"]:
-            mod["top_reasons_map"][action["reason"]] = mod["top_reasons_map"].get(action["reason"], 0) + 1
+        if action["target"]: mod["top_targets_map"][action["target"]] = mod["top_targets_map"].get(action["target"], 0) + 1
+        if action["reason"]: mod["top_reasons_map"][action["reason"]] = mod["top_reasons_map"].get(action["reason"], 0) + 1
 
         mod["logs"].append(action)
 
@@ -442,20 +270,9 @@ def build_summary_from_events(events):
 
     mods = []
     for mod in mods_map.values():
-        mod["top_targets"] = sorted(
-            [{"n": k, "c": v} for k, v in mod["top_targets_map"].items()],
-            key=lambda x: x["c"],
-            reverse=True
-        )[:10]
-
-        mod["top_reasons"] = sorted(
-            [{"r": k, "c": v} for k, v in mod["top_reasons_map"].items()],
-            key=lambda x: x["c"],
-            reverse=True
-        )[:10]
-
+        mod["top_targets"] = sorted([{"n": k, "c": v} for k, v in mod["top_targets_map"].items()], key=lambda x: x["c"], reverse=True)[:10]
+        mod["top_reasons"] = sorted([{"r": k, "c": v} for k, v in mod["top_reasons_map"].items()], key=lambda x: x["c"], reverse=True)[:10]
         mod["logs"] = sorted(mod["logs"], key=lambda x: x["t"], reverse=True)[:120]
-
         del mod["top_targets_map"]
         del mod["top_reasons_map"]
         mods.append(mod)
@@ -540,17 +357,8 @@ async def api_streams(limit: int = Query(30, ge=1, le=200)):
     try:
         rows = conn.execute("""
             SELECT
-                id,
-                streamer_name,
-                channel_id,
-                started_at,
-                ended_at,
-                label_date,
-                status,
-                reconnect_group,
-                session_type,
-                created_at,
-                updated_at
+                id, streamer_name, channel_id, started_at, ended_at,
+                label_date, status, reconnect_group, session_type, created_at, updated_at
             FROM streams
             ORDER BY id DESC
             LIMIT ?
@@ -576,20 +384,10 @@ async def api_active_stream():
     try:
         row = conn.execute("""
             SELECT
-                id,
-                streamer_name,
-                channel_id,
-                started_at,
-                ended_at,
-                label_date,
-                status,
-                reconnect_group,
-                session_type,
-                created_at,
-                updated_at
+                id, streamer_name, channel_id, started_at, ended_at,
+                label_date, status, reconnect_group, session_type, created_at, updated_at
             FROM streams
-            WHERE status = 'live'
-              AND session_type = 'stream'
+            WHERE status = 'live' AND session_type = 'stream'
             ORDER BY id DESC
             LIMIT 1
         """).fetchone()
@@ -614,59 +412,57 @@ async def api_stream_events(
     conn = get_db_connection()
     try:
         stream = conn.execute("""
-            SELECT
-                id,
-                streamer_name,
-                channel_id,
-                started_at,
-                ended_at,
-                label_date,
-                status,
-                reconnect_group,
-                session_type,
-                created_at,
-                updated_at
+            SELECT id, streamer_name, channel_id, started_at, ended_at, label_date, status, reconnect_group, session_type, created_at, updated_at
             FROM streams
-            WHERE id = ?
-            LIMIT 1
+            WHERE id = ? LIMIT 1
         """, (stream_id,)).fetchone()
 
         if not stream:
-            return {
-                "ok": False,
-                "error": "stream_not_found"
-            }
+            return {"ok": False, "error": "stream_not_found"}
 
         rows = conn.execute("""
-            SELECT
-                id,
-                stream_id,
-                timestamp,
-                event_name,
-                event_type,
-                username,
-                target_username,
-                moderator,
-                message,
-                reason,
-                duration,
-                permanent,
-                session_type,
-                raw_json,
-                created_at
+            SELECT id, stream_id, timestamp, event_name, event_type, username, target_username, moderator, message, reason, duration, permanent, session_type, raw_json, created_at
             FROM events
-            WHERE stream_id = ?
-            ORDER BY id DESC
-            LIMIT ?
+            WHERE stream_id = ? ORDER BY id DESC LIMIT ?
         """, (stream_id, limit)).fetchall()
 
         stream_dict = dict(stream)
         stream_dict["display_label"] = build_stream_label(stream)
 
+        return {"ok": True, "stream": stream_dict, "events": [dict(r) for r in rows]}
+    finally:
+        conn.close()
+
+
+# --- YENİ EKLENEN KULLANICI MESAJLARI ENDPOINTİ ---
+@app.get("/api/user_messages")
+async def api_user_messages(
+    username: str = Query(..., description="Kullanıcı adı"), 
+    date: str = Query(..., description="Yayın tarihi (Örn: 2026-04-30)"), 
+    page: int = Query(1, ge=1, description="Sayfa numarası")
+):
+    limit = 50
+    offset = (page - 1) * limit
+    conn = get_db_connection()
+    try:
+        # İlgili güne ait mesajları sayfalı (pagination) olarak getir.
+        rows = conn.execute("""
+            SELECT e.timestamp, e.message 
+            FROM events e
+            JOIN streams s ON e.stream_id = s.id
+            WHERE e.username = ? 
+              AND s.label_date = ? 
+              AND e.event_type = 'chat'
+            ORDER BY e.timestamp ASC
+            LIMIT ? OFFSET ?
+        """, (username, date, limit, offset)).fetchall()
+        
         return {
             "ok": True,
-            "stream": stream_dict,
-            "events": [dict(r) for r in rows]
+            "username": username,
+            "date": date,
+            "page": page,
+            "messages": [dict(r) for r in rows]
         }
     finally:
         conn.close()
@@ -690,134 +486,43 @@ async def api_data(
             "session_type": None,
         }
 
-        if mode == "live":
-            selected_stream = conn.execute("""
-                SELECT *
-                FROM streams
-                WHERE status = 'live'
-                  AND session_type = 'stream'
-                ORDER BY id DESC
-                LIMIT 1
-            """).fetchone()
-
-            if not selected_stream:
-                meta["label"] = "Canlı yayın"
-                meta["live_stream_active"] = False
-                meta["warning"] = "Canlı yayın kapalı"
-                return {
-                    "ok": True,
-                    "mode": mode,
-                    "stream": None,
-                    "meta": meta,
-                    "summary": build_summary_from_events([])
-                }
-
-            rows = conn.execute("""
-                SELECT *
-                FROM events
-                WHERE stream_id = ?
-                ORDER BY id DESC
-            """, (selected_stream["id"],)).fetchall()
-
-            meta["label"] = "Canlı yayın"
-            meta["live_stream_active"] = True
-            meta["session_type"] = "stream"
-
-        elif mode == "offstream_live":
-            selected_stream = conn.execute("""
-                SELECT *
-                FROM streams
-                WHERE session_type = 'offstream'
-                  AND label_date = date('now')
-                ORDER BY id DESC
-                LIMIT 1
-            """).fetchone()
-
-            if not selected_stream:
-                meta["label"] = "Canlı offstream"
-                meta["warning"] = "Bugün için offstream verisi yok"
-                meta["session_type"] = "offstream"
-                return {
-                    "ok": True,
-                    "mode": mode,
-                    "stream": None,
-                    "meta": meta,
-                    "summary": build_summary_from_events([])
-                }
-
-            rows = conn.execute("""
-                SELECT *
-                FROM events
-                WHERE stream_id = ?
-                ORDER BY id DESC
-            """, (selected_stream["id"],)).fetchall()
-
-            meta["label"] = "Canlı offstream"
-            meta["session_type"] = "offstream"
-
-        elif mode == "stream":
-            if not stream_id:
-                return {
-                    "ok": False,
-                    "error": "stream_id_required"
-                }
-
-            selected_stream = conn.execute("""
-                SELECT *
-                FROM streams
-                WHERE id = ?
-                LIMIT 1
-            """, (stream_id,)).fetchone()
-
-            if not selected_stream:
-                return {
-                    "ok": False,
-                    "error": "stream_not_found"
-                }
-
-            rows = conn.execute("""
-                SELECT *
-                FROM events
-                WHERE stream_id = ?
-                ORDER BY id DESC
-            """, (stream_id,)).fetchall()
-
-            meta["label"] = build_stream_label(selected_stream)
-            meta["session_type"] = selected_stream["session_type"]
-
-        elif mode == "all":
-            rows = conn.execute("""
-                SELECT *
-                FROM events
-                ORDER BY id DESC
-            """).fetchall()
-
-            meta["label"] = "Tüm veriler"
-
-        elif mode == "day":
+        # --- YENİ EKLENEN STATİK JSON KONTROLÜ ---
+        if mode == "day":
             if not date:
+                return {"ok": False, "error": "date_required"}
+
+            summary_path = Path(f"static/summaries/{date}.json")
+            if summary_path.exists():
+                # Json dosyası varsa RAM ve işlemci harcamadan hemen oku
+                with open(summary_path, "r", encoding="utf-8") as f:
+                    summary_data = json.load(f)
+                
+                streams = conn.execute("SELECT id FROM streams WHERE label_date = ? AND session_type = 'stream'", (date,)).fetchall()
+                stream_ids = [r["id"] for r in streams]
+                
+                meta["label"] = f"{format_human_date(date)} verisi"
+                meta["stream_count"] = len(stream_ids)
+                meta["stream_ids"] = stream_ids
+                meta["session_type"] = "stream"
+                
                 return {
-                    "ok": False,
-                    "error": "date_required"
+                    "ok": True,
+                    "mode": mode,
+                    "stream": None,
+                    "meta": meta,
+                    "summary": summary_data
                 }
 
+            # JSON dosyası henüz yoksa (yayın kapanmadıysa veya analyzer.py çalışmadıysa) eski sisteme dönerek hesapla
             streams = conn.execute("""
-                SELECT *
-                FROM streams
-                WHERE label_date = ?
-                  AND session_type = 'stream'
-                ORDER BY id DESC
+                SELECT * FROM streams WHERE label_date = ? AND session_type = 'stream' ORDER BY id DESC
             """, (date,)).fetchall()
 
             stream_ids = [r["id"] for r in streams]
-
             if stream_ids:
                 placeholders = ",".join("?" for _ in stream_ids)
                 rows = conn.execute(f"""
-                    SELECT *
-                    FROM events
-                    WHERE stream_id IN ({placeholders})
-                    ORDER BY id DESC
+                    SELECT * FROM events WHERE stream_id IN ({placeholders}) ORDER BY id DESC
                 """, stream_ids).fetchall()
             else:
                 rows = []
@@ -827,88 +532,72 @@ async def api_data(
             meta["stream_ids"] = stream_ids
             meta["session_type"] = "stream"
 
+        elif mode == "live":
+            selected_stream = conn.execute("SELECT * FROM streams WHERE status = 'live' AND session_type = 'stream' ORDER BY id DESC LIMIT 1").fetchone()
+            if not selected_stream:
+                meta["label"] = "Canlı yayın"
+                meta["live_stream_active"] = False
+                meta["warning"] = "Canlı yayın kapalı"
+                return {"ok": True, "mode": mode, "stream": None, "meta": meta, "summary": build_summary_from_events([])}
+
+            rows = conn.execute("SELECT * FROM events WHERE stream_id = ? ORDER BY id DESC", (selected_stream["id"],)).fetchall()
+            meta["label"] = "Canlı yayın"
+            meta["live_stream_active"] = True
+            meta["session_type"] = "stream"
+
+        elif mode == "offstream_live":
+            selected_stream = conn.execute("SELECT * FROM streams WHERE session_type = 'offstream' AND label_date = date('now') ORDER BY id DESC LIMIT 1").fetchone()
+            if not selected_stream:
+                meta["label"] = "Canlı offstream"
+                meta["warning"] = "Bugün için offstream verisi yok"
+                meta["session_type"] = "offstream"
+                return {"ok": True, "mode": mode, "stream": None, "meta": meta, "summary": build_summary_from_events([])}
+
+            rows = conn.execute("SELECT * FROM events WHERE stream_id = ? ORDER BY id DESC", (selected_stream["id"],)).fetchall()
+            meta["label"] = "Canlı offstream"
+            meta["session_type"] = "offstream"
+
+        elif mode == "stream":
+            if not stream_id: return {"ok": False, "error": "stream_id_required"}
+            selected_stream = conn.execute("SELECT * FROM streams WHERE id = ? LIMIT 1", (stream_id,)).fetchone()
+            if not selected_stream: return {"ok": False, "error": "stream_not_found"}
+
+            rows = conn.execute("SELECT * FROM events WHERE stream_id = ? ORDER BY id DESC", (stream_id,)).fetchall()
+            meta["label"] = build_stream_label(selected_stream)
+            meta["session_type"] = selected_stream["session_type"]
+
+        elif mode == "all":
+            rows = conn.execute("SELECT * FROM events ORDER BY id DESC").fetchall()
+            meta["label"] = "Tüm veriler"
+
         elif mode == "offstream_day":
-            if not date:
-                return {
-                    "ok": False,
-                    "error": "date_required"
-                }
-
-            streams = conn.execute("""
-                SELECT *
-                FROM streams
-                WHERE label_date = ?
-                  AND session_type = 'offstream'
-                ORDER BY id DESC
-            """, (date,)).fetchall()
-
+            if not date: return {"ok": False, "error": "date_required"}
+            streams = conn.execute("SELECT * FROM streams WHERE label_date = ? AND session_type = 'offstream' ORDER BY id DESC", (date,)).fetchall()
             stream_ids = [r["id"] for r in streams]
-
             if stream_ids:
                 placeholders = ",".join("?" for _ in stream_ids)
-                rows = conn.execute(f"""
-                    SELECT *
-                    FROM events
-                    WHERE stream_id IN ({placeholders})
-                    ORDER BY id DESC
-                """, stream_ids).fetchall()
-            else:
-                rows = []
-
+                rows = conn.execute(f"SELECT * FROM events WHERE stream_id IN ({placeholders}) ORDER BY id DESC", stream_ids).fetchall()
+            else: rows = []
             meta["label"] = f"{format_human_date(date)} offstream"
             meta["stream_count"] = len(stream_ids)
             meta["stream_ids"] = stream_ids
             meta["session_type"] = "offstream"
 
         elif mode == "week":
-            rows = conn.execute("""
-                SELECT *
-                FROM events
-                WHERE date(timestamp) >= date('now', '-7 day')
-                ORDER BY id DESC
-            """).fetchall()
-
+            rows = conn.execute("SELECT * FROM events WHERE date(timestamp) >= date('now', '-7 day') ORDER BY id DESC").fetchall()
             meta["label"] = "Son 7 gün verisi"
 
         elif mode == "month":
-            if not month:
-                return {
-                    "ok": False,
-                    "error": "month_required"
-                }
-
-            rows = conn.execute("""
-                SELECT *
-                FROM events
-                WHERE substr(timestamp, 1, 7) = ?
-                ORDER BY id DESC
-            """, (month,)).fetchall()
-
+            if not month: return {"ok": False, "error": "month_required"}
+            rows = conn.execute("SELECT * FROM events WHERE substr(timestamp, 1, 7) = ? ORDER BY id DESC", (month,)).fetchall()
             try:
                 month_dt = datetime.strptime(month, "%Y-%m")
-                months = {
-                    1: "Ocak",
-                    2: "Şubat",
-                    3: "Mart",
-                    4: "Nisan",
-                    5: "Mayıs",
-                    6: "Haziran",
-                    7: "Temmuz",
-                    8: "Ağustos",
-                    9: "Eylül",
-                    10: "Ekim",
-                    11: "Kasım",
-                    12: "Aralık",
-                }
+                months = {1: "Ocak", 2: "Şubat", 3: "Mart", 4: "Nisan", 5: "Mayıs", 6: "Haziran", 7: "Temmuz", 8: "Ağustos", 9: "Eylül", 10: "Ekim", 11: "Kasım", 12: "Aralık"}
                 meta["label"] = f"{months[month_dt.month]} {month_dt.year} verisi"
             except Exception:
                 meta["label"] = f"Ay: {month}"
-
         else:
-            return {
-                "ok": False,
-                "error": "invalid_mode"
-            }
+            return {"ok": False, "error": "invalid_mode"}
 
         summary = build_summary_from_events(rows)
 

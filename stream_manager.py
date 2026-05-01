@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 import subprocess
+import os
 
 from db import (
     get_active_stream,
@@ -172,6 +173,12 @@ def _close_active_stream(active):
     set_state("active_stream_id", "")
     set_state("offline_since", "")
     print(f"Stream kapandı: {active['id']}")
+    
+    # --- YENİ EKLENEN KISIM: OTOMATİK ANALİZ TETİKLEYİCİ ---
+    label_date = active.get("label_date")
+    if label_date:
+        print(f"[{label_date}] Yayın sonlandı. İstatistik analizi arka planda başlatılıyor...")
+        subprocess.Popen(["python", "analyzer.py", label_date])
 
 
 def monitor_stream_status():
