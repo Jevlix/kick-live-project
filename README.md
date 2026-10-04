@@ -1,4 +1,4 @@
-# Kick Live Analytics v5
+# Kick Live Analytics v8
 
 Performans odaklı Kick canlı yayın arşivleyici ve analiz paneli.
 
@@ -40,3 +40,11 @@ Kick Public API canlı kanal/livestream metadata sağlayabilir. `events:subscrib
 - Ana sayfa TOP 15 kullanıcı kartları artık gerçek kullanıcı detayını açar.
 - 5 saniyelik dashboard yenilemesi açık kullanıcı modalındaki kelime/emote/mesaj detaylarını silemez.
 - Hafif kullanıcı özeti ile detay modalı state'i bilinçli olarak ayrıdır.
+
+
+## v8 runtime hardening
+- Kick socket ingestion is isolated from slow dashboard websocket clients.
+- Batch DB writes fall back to per-event writes if a batch contains one problematic event.
+- Recorder components are supervised and automatically restarted after unexpected task failure.
+- Runtime paths are absolute to the project directory.
+- See `VPS_KURULUM.md` for a clean Windows VPS deployment.

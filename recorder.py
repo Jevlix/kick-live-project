@@ -1,6 +1,7 @@
 import asyncio
 import json
 import re
+import inspect
 from datetime import datetime, timezone
 
 import websockets
@@ -22,9 +23,20 @@ class KickRecorder:
         self.recent_message_ids: dict[str, float] = {}
         self.last_user_message: dict[str, str] = {}
         self.file_index: dict[int, int] = {}
-        self.stats = {'received': 0, 'chat': 0, 'stored': 0, 'duplicates': 0, 'errors': 0}
+        self.stats = {
+            'received': 0,
+            'chat': 0,
+            'stored': 0,
+            'duplicates': 0,
+            'errors': 0,
+            'last_received_at': None,
+            'last_chat_at': None,
+            'last_stored_at': None,
+            'last_error': None,
+        }
         self.stop_event = asyncio.Event()
         self.on_event = None
+        self._callback_tasks: set[asyncio.Task] = set()
 
     @staticmethod
     def parse_data(raw):
@@ -224,56 +236,134 @@ class KickRecorder:
                 if sid:
                     session_type = 'stream'
         if sid is None:
-            # v5 stores only actual livestream sessions. Chatroom traffic while offline is ignored.
+            # Only real livestream sessions are stored.
             return
+
         entry['stream_id'] = sid
         entry['stream_label_date'] = date_label
         entry['session_type'] = session_type
+
         await self.queue.put(entry)
+
+        # Never let a slow/broken dashboard websocket stop Kick/Pusher ingestion.
         if self.on_event:
             try:
                 result = self.on_event(entry)
-                if asyncio.iscoroutine(result):
-                    await result
-            except Exception:
-                pass
+                if inspect.isawaitable(result):
+                    task = asyncio.create_task(result, name='kick-broadcast')
+                    self._callback_tasks.add(task)
+                    task.add_done_callback(self._callback_tasks.discard)
+            except Exception as e:
+                self.stats['errors'] += 1
+                self.stats['last_error'] = f'broadcast callback: {e}'
+                print(f'[WS] callback hatası: {e}', flush=True)
 
     async def writer_worker(self):
         conn = connect()
         writer = BatchWriter(conn)
         batch = []
-        print(f'[DB] Batch writer hazır. batch={DB_BATCH_SIZE}')
+        print(f'[DB] Batch writer hazır. batch={DB_BATCH_SIZE}', flush=True)
+
+        def mark_done(items):
+            for _ in items:
+                try:
+                    self.queue.task_done()
+                except ValueError:
+                    pass
+
+        async def write_jsonl(items):
+            for e in items:
+                try:
+                    self.rotate_if_needed(e['stream_id'], e['stream_label_date'], e['session_type'])
+                    path = self.log_path(e['stream_id'], e['stream_label_date'], e['session_type'])
+                    with path.open('a', encoding='utf-8') as f:
+                        f.write(json.dumps(e, ensure_ascii=False, separators=(',', ':')) + '\\n')
+                except Exception as log_error:
+                    # File logging must never stop DB ingestion.
+                    self.stats['errors'] += 1
+                    self.stats['last_error'] = f'jsonl: {log_error}'
+                    print(f'[LOG] JSONL yazma hatası: {log_error}', flush=True)
+
+        async def flush_batch(items):
+            if not items:
+                return
+
+            try:
+                writer.write_batch(items)
+                self.stats['stored'] += len(items)
+                self.stats['last_stored_at'] = datetime.now(timezone.utc).isoformat()
+                await write_jsonl(items)
+                mark_done(items)
+                items.clear()
+                return
+            except Exception as batch_error:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+
+                self.stats['errors'] += 1
+                self.stats['last_error'] = f'batch: {batch_error}'
+                print(f'[DB] batch yazma hatası; tek tek deniyorum: {batch_error}', flush=True)
+
+            # One malformed/edge-case event must never block the rest of the stream.
+            failed = 0
+            for item in list(items):
+                try:
+                    writer.write_batch([item])
+                    self.stats['stored'] += 1
+                    self.stats['last_stored_at'] = datetime.now(timezone.utc).isoformat()
+                    await write_jsonl([item])
+                except Exception as item_error:
+                    try:
+                        conn.rollback()
+                    except Exception:
+                        pass
+                    failed += 1
+                    self.stats['errors'] += 1
+                    self.stats['last_error'] = f'item: {item_error}'
+                    print(
+                        f"[DB] event atlandı stream={item.get('stream_id')} "
+                        f"type={item.get('type')} id={item.get('message_id')}: {item_error}",
+                        flush=True,
+                    )
+                finally:
+                    mark_done([item])
+
+            if failed:
+                print(f'[DB] {failed} event tekil yazımda da başarısız.', flush=True)
+            items.clear()
+
         try:
             while self.running or not self.queue.empty():
                 try:
-                    item = await asyncio.wait_for(self.queue.get(), timeout=DB_BATCH_WAIT_MS / 1000)
+                    item = await asyncio.wait_for(
+                        self.queue.get(),
+                        timeout=DB_BATCH_WAIT_MS / 1000,
+                    )
                     batch.append(item)
                 except asyncio.TimeoutError:
                     pass
+
                 if not batch:
                     continue
+
                 if len(batch) < DB_BATCH_SIZE and not self.queue.empty():
                     continue
-                try:
-                    for e in batch:
-                        self.rotate_if_needed(e['stream_id'], e['stream_label_date'], e['session_type'])
-                        path = self.log_path(e['stream_id'], e['stream_label_date'], e['session_type'])
-                        with path.open('a', encoding='utf-8') as f:
-                            f.write(json.dumps(e, ensure_ascii=False, separators=(',', ':')) + '\n')
-                    writer.write_batch(batch)
-                    self.stats['stored'] += len(batch)
-                    for _ in batch: self.queue.task_done()
-                    batch.clear()
-                except Exception as e:
-                    self.stats['errors'] += 1
-                    print(f'[DB] batch yazma hatası: {e}')
-                    await asyncio.sleep(1)
+
+                await flush_batch(batch)
         finally:
             if batch:
-                writer.write_batch(batch)
+                try:
+                    await flush_batch(batch)
+                except Exception as e:
+                    try:
+                        conn.rollback()
+                    except Exception:
+                        pass
+                    print(f'[DB] kapanış flush hatası: {e}', flush=True)
             conn.close()
-            print('[DB] Writer kapandı.')
-
+            print('[DB] Writer kapandı.', flush=True)
 
     async def _monitor_task(self):
         from stream_manager import monitor_once
@@ -290,58 +380,152 @@ class KickRecorder:
     async def socket_listener(self):
         if not CHANNEL_SLUG:
             raise RuntimeError('KICK_CHANNEL_SLUG .env içinde ayarlanmalı.')
+
         while self.running:
             try:
                 meta = await asyncio.to_thread(get_channel_meta)
                 chatroom_id = (meta or {}).get('chatroom_id') or await asyncio.to_thread(get_chatroom_id)
+
                 if not chatroom_id:
-                    print('[KICK] Chatroom ID bulunamadı. 10 sn sonra tekrar deniyorum.')
-                    await asyncio.sleep(10); continue
-                print(f'[KICK] Pusher bağlanıyor: {CHANNEL_SLUG} chatroom={chatroom_id}')
-                async with websockets.connect(PUSHER_WS_URL, ping_interval=25, ping_timeout=25, close_timeout=10, max_size=4 * 1024 * 1024) as ws:
-                    await ws.send(json.dumps({'event':'pusher:subscribe','data':{'auth':'','channel':f'chatrooms.{chatroom_id}.v2'}}))
-                    print('[KICK] Chat subscription gönderildi.')
+                    print('[KICK] Chatroom ID bulunamadı. 10 sn sonra tekrar deniyorum.', flush=True)
+                    await asyncio.sleep(10)
+                    continue
+
+                print(
+                    f'[KICK] Pusher bağlanıyor: {CHANNEL_SLUG} chatroom={chatroom_id}',
+                    flush=True,
+                )
+
+                async with websockets.connect(
+                    PUSHER_WS_URL,
+                    ping_interval=25,
+                    ping_timeout=25,
+                    close_timeout=10,
+                    max_size=4 * 1024 * 1024,
+                ) as ws:
+                    await ws.send(json.dumps({
+                        'event': 'pusher:subscribe',
+                        'data': {
+                            'auth': '',
+                            'channel': f'chatrooms.{chatroom_id}.v2',
+                        },
+                    }))
+                    print('[KICK] Chat subscription gönderildi.', flush=True)
+
                     async for message in ws:
-                        if not self.running: break
+                        if not self.running:
+                            break
+
                         self.stats['received'] += 1
-                        try: raw = json.loads(message)
-                        except Exception: continue
-                        event = raw.get('event','')
-                        if event == 'pusher:ping':
-                            await ws.send(json.dumps({'event':'pusher:pong','data':{}})); continue
-                        if event in {'pusher:pong','pusher:connection_established','pusher_internal:subscription_succeeded','pusher:subscription_succeeded'}:
+                        self.stats['last_received_at'] = datetime.now(timezone.utc).isoformat()
+
+                        try:
+                            raw = json.loads(message)
+                        except Exception:
                             continue
+
+                        event = raw.get('event', '')
+                        if event == 'pusher:ping':
+                            await ws.send(json.dumps({'event': 'pusher:pong', 'data': {}}))
+                            continue
+
+                        if event in {
+                            'pusher:pong',
+                            'pusher:connection_established',
+                            'pusher_internal:subscription_succeeded',
+                            'pusher:subscription_succeeded',
+                        }:
+                            continue
+
                         data = self.parse_data(raw)
-                        if data is None: continue
+                        if data is None:
+                            continue
+
                         name = self.event_name(event)
                         entry = self.normalize_event(data, name)
+
                         if entry.get('type') == 'chat':
                             self.stats['chat'] += 1
-                            if PRINT_CHAT: print(f"[CHAT] {entry.get('user')}: {entry.get('msg')}")
+                            self.stats['last_chat_at'] = entry.get('t')
+                            if PRINT_CHAT:
+                                print(
+                                    f"[CHAT] {entry.get('user')}: {entry.get('msg')}",
+                                    flush=True,
+                                )
+
                         await self.enqueue(entry)
+
             except asyncio.CancelledError:
                 raise
             except Exception as e:
-                print(f'[KICK] bağlantı hatası: {e}')
-                await asyncio.sleep(RECONNECT_DELAY_SECONDS)
+                self.stats['errors'] += 1
+                self.stats['last_error'] = f'socket: {e}'
+                print(f'[KICK] bağlantı hatası: {repr(e)}', flush=True)
+                if self.running:
+                    await asyncio.sleep(RECONNECT_DELAY_SECONDS)
+
+    async def _supervise(self, name, factory):
+        while self.running:
+            try:
+                await factory()
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                self.stats['errors'] += 1
+                self.stats['last_error'] = f'{name}: {e}'
+                print(f'[{name}] task durdu, yeniden başlatılıyor: {repr(e)}', flush=True)
+            if self.running:
+                await asyncio.sleep(2)
 
     async def run(self):
         init_db()
         tasks = [
-            asyncio.create_task(self.writer_worker()),
-            asyncio.create_task(self.socket_listener()),
-            asyncio.create_task(monitor_loop(self.stop_event)),
+            asyncio.create_task(
+                self._supervise('DB', self.writer_worker),
+                name='kick-db-supervisor',
+            ),
+            asyncio.create_task(
+                self._supervise('KICK', self.socket_listener),
+                name='kick-socket-supervisor',
+            ),
+            asyncio.create_task(
+                self._supervise('STREAM', lambda: monitor_loop(self.stop_event)),
+                name='kick-stream-supervisor',
+            ),
         ]
+
+        print('[RECORDER] Recorder supervisors başladı.', flush=True)
+
         try:
-            await asyncio.gather(*tasks)
-        except (KeyboardInterrupt, asyncio.CancelledError):
-            pass
+            await self.stop_event.wait()
+        except asyncio.CancelledError:
+            raise
         finally:
             self.running = False
             self.stop_event.set()
-            await self.queue.join()
-            for t in tasks:
-                if not t.done(): t.cancel()
+
+            # Give writer time to drain everything already queued.
+            try:
+                await asyncio.wait_for(self.queue.join(), timeout=15)
+            except asyncio.TimeoutError:
+                print(
+                    f'[DB] shutdown queue drain timeout; kalan={self.queue.qsize()}',
+                    flush=True,
+                )
+
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+            # Don't keep detached websocket callback tasks alive at shutdown.
+            for task in list(self._callback_tasks):
+                task.cancel()
+            if self._callback_tasks:
+                await asyncio.gather(*self._callback_tasks, return_exceptions=True)
+
+            print('[RECORDER] Recorder kapandı.', flush=True)
 
 
 async def main():

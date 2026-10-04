@@ -1,12 +1,13 @@
 import asyncio
 import json
+import os
 from datetime import datetime, timezone
 from typing import Optional, Set
 
 from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 
-from config import CHANNEL_SLUG
+from config import BASE_DIR, CHANNEL_SLUG, DB_PATH
 from db import connect, get_active_stream, init_db
 from recorder import KickRecorder
 from stream_manager import get_channel_meta
@@ -15,7 +16,7 @@ app = FastAPI(title='Kick Live Analytics', version='2.0.0')
 connected_clients: Set[WebSocket] = set()
 recent_messages: list[dict] = []
 recorder: KickRecorder | None = None
-recorder_tasks: list[asyncio.Task] = []
+recorder_task: asyncio.Task | None = None
 
 
 def now_iso():
@@ -39,13 +40,23 @@ def push_recent(payload: dict):
 
 async def broadcast(payload: dict):
     push_recent(payload)
-    if not connected_clients: return
-    dead = []
+    if not connected_clients:
+        return
+
     text = json.dumps(payload, ensure_ascii=False)
-    for ws in list(connected_clients):
-        try: await ws.send_text(text)
-        except Exception: dead.append(ws)
-    for ws in dead: connected_clients.discard(ws)
+    sockets = list(connected_clients)
+
+    async def send_one(ws):
+        try:
+            await asyncio.wait_for(ws.send_text(text), timeout=2.0)
+            return None
+        except Exception:
+            return ws
+
+    results = await asyncio.gather(*(send_one(ws) for ws in sockets), return_exceptions=True)
+    for result in results:
+        if result is not None and result is not True:
+            connected_clients.discard(result)
 
 
 def _event_payload(entry):
@@ -157,17 +168,66 @@ def summary_for_stream_ids(conn, ids: list[int], event_limit=1000):
             'game_special':{'all_pool':words,'top_10_users':users[:10],'top_10_words':words[:10],'top_10_emotes':emotes[:10]}}
 
 
+def _latest_chat_row(conn, stream_id):
+    if not stream_id:
+        return None
+    row = conn.execute(
+        'SELECT username,timestamp,message,message_id FROM chat_messages WHERE stream_id=? ORDER BY id DESC LIMIT 1',
+        (stream_id,),
+    ).fetchone()
+    return dict(row) if row else None
+
+
 @app.get('/health')
 async def health():
     active = get_active_stream()
-    return {'ok':True,'channel':CHANNEL_SLUG,'live':bool(active),'db':'ok','recorder_running':bool(recorder and recorder.running)}
+    conn = connect()
+    try:
+        latest = _latest_chat_row(conn, active['id'] if active else None)
+    finally:
+        conn.close()
+
+    return {
+        'ok': True,
+        'channel': CHANNEL_SLUG,
+        'live': bool(active),
+        'db': 'ok',
+        'recorder_running': bool(recorder and recorder.running),
+        'recorder_task_done': bool(recorder_task and recorder_task.done()),
+        'queue_size': recorder.queue.qsize() if recorder else 0,
+        'latest_chat': latest,
+    }
 
 
 @app.get('/api/status')
 async def api_status():
     active = get_active_stream()
     meta = await asyncio.to_thread(get_channel_meta)
-    return {'ok':True,'channel':meta or {'slug':CHANNEL_SLUG},'live':bool(meta and meta.get('is_live')),'active_stream':row_dict(active),'recorder_stats':recorder.stats if recorder else {}}
+
+    conn = connect()
+    try:
+        latest = _latest_chat_row(conn, active['id'] if active else None)
+        db_stats = None
+        if active:
+            row = conn.execute(
+                'SELECT total_messages,last_event_at,updated_at FROM stream_stats WHERE stream_id=?',
+                (active['id'],),
+            ).fetchone()
+            db_stats = dict(row) if row else None
+    finally:
+        conn.close()
+
+    return {
+        'ok': True,
+        'channel': meta or {'slug': CHANNEL_SLUG},
+        'live': bool(meta and meta.get('is_live')),
+        'active_stream': row_dict(active),
+        'recorder_stats': recorder.stats if recorder else {},
+        'recorder_task_done': bool(recorder_task and recorder_task.done()),
+        'queue_size': recorder.queue.qsize() if recorder else 0,
+        'db_stats': db_stats,
+        'latest_chat': latest,
+    }
 
 
 @app.get('/api/streams')
@@ -297,33 +357,86 @@ async def api_data(mode:str='live', date:Optional[str]=None, month:Optional[str]
 
 
 @app.websocket('/ws')
-async def websocket_endpoint(websocket:WebSocket):
-    await websocket.accept(); connected_clients.add(websocket)
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    connected_clients.add(websocket)
+
     try:
-        await websocket.send_text(json.dumps({'type':'bootstrap','time':now_iso(),'state':{'channel':CHANNEL_SLUG},'recent':recent_messages},ensure_ascii=False))
-        while True: await websocket.receive_text()
-    except (WebSocketDisconnect, Exception):
+        await websocket.send_text(json.dumps({
+            'type': 'bootstrap',
+            'time': now_iso(),
+            'state': {'channel': CHANNEL_SLUG},
+        }, ensure_ascii=False))
+
+        # Hydrate the live chat immediately from SQLite after reconnect/restart.
+        active = get_active_stream()
+        if active:
+            conn = connect()
+            try:
+                rows = conn.execute(
+                    '''SELECT username,message,timestamp,message_id
+                       FROM chat_messages
+                       WHERE stream_id=?
+                       ORDER BY id DESC
+                       LIMIT 50''',
+                    (active['id'],),
+                ).fetchall()
+            finally:
+                conn.close()
+
+            for row in reversed(rows):
+                payload = {
+                    'type': 'chat',
+                    'event': 'ChatMessageEvent',
+                    'user': row['username'],
+                    'msg': row['message'],
+                    'message_id': row['message_id'],
+                    'time': row['timestamp'],
+                    'stream_id': active['id'],
+                }
+                await asyncio.wait_for(
+                    websocket.send_text(json.dumps(payload, ensure_ascii=False)),
+                    timeout=2.0,
+                )
+
+        # Keep the websocket alive. Client messages are optional.
+        while True:
+            await websocket.receive_text()
+
+    except asyncio.CancelledError:
+        raise
+    except Exception:
         connected_clients.discard(websocket)
 
 
 @app.on_event('startup')
 async def startup_event():
-    global recorder, recorder_tasks
+    global recorder, recorder_task
     init_db()
-    recorder=KickRecorder()
+    recorder = KickRecorder()
     recorder.on_event = recorder_event
-    # Recorder's socket + DB writer + live monitor all live in the same process as FastAPI.
-    recorder_tasks=[asyncio.create_task(recorder.writer_worker()), asyncio.create_task(recorder.socket_listener()), asyncio.create_task(recorder._monitor_task())]
+    recorder_task = asyncio.create_task(recorder.run(), name='kick-recorder-service')
+    print(
+        f'[SERVER] started recorder task pid={os.getpid()} db={DB_PATH}',
+        flush=True,
+    )
 
 
 @app.on_event('shutdown')
 async def shutdown_event():
+    global recorder_task
+
     if recorder:
-        recorder.running=False
+        recorder.running = False
         recorder.stop_event.set()
-        await recorder.queue.join()
-    for task in recorder_tasks:
-        if not task.done(): task.cancel()
+
+    if recorder_task:
+        try:
+            await asyncio.wait_for(recorder_task, timeout=20)
+        except asyncio.TimeoutError:
+            recorder_task.cancel()
+            await asyncio.gather(recorder_task, return_exceptions=True)
 
 
-app.mount('/', StaticFiles(directory='static', html=True), name='static')
+
+app.mount('/', StaticFiles(directory=str(BASE_DIR / 'static'), html=True), name='static')

@@ -1,13 +1,15 @@
 import os
 from pathlib import Path
 
+BASE_DIR = Path(__file__).resolve().parent
+ENV_FILE = BASE_DIR / '.env'
+
 try:
     from dotenv import load_dotenv
-    load_dotenv()
+    load_dotenv(ENV_FILE)
 except Exception:
     pass
 
-BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / 'data'
 LOGS_DIR = DATA_DIR / 'logs'
 SUMMARIES_DIR = DATA_DIR / 'summaries'
