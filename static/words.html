@@ -51,13 +51,7 @@
                         <label class="block text-[10px] uppercase font-black opacity-50 mb-2">Veri Modu</label>
                         <select v-model="filter.mode" @change="handleModeChange" class="w-full bg-[#0b0f14] text-white border border-white/10 rounded-2xl px-4 py-3 text-sm font-black outline-none appearance-none">
                             <option value="live">Canlı Yayın</option>
-                            <option value="offstream_live">Canlı Offstream</option>
-                            <option value="stream">Yayın Seç</option>
-                            <option value="day">Gün Seç</option>
-                            <option value="offstream_day">Offstream Gün</option>
-                            <option value="week">Son 7 Gün</option>
-                            <option value="month">Ay Seç</option>
-                            <option value="all">Tüm Zamanlar</option>
+                            <option value="stream">Önceki Yayınlar</option>
                         </select>
                     </div>
 
@@ -102,7 +96,7 @@
                 </div>
             </header>
 
-            <section class="page-section flex-1 p-8 scroll-flat">
+            <section class="page-section flex-1 min-h-0 p-8 scroll-flat">
                 <div class="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-5 gap-4 mb-8">
                     <div class="stat-card">
                         <p class="opacity-50 text-xs font-bold mb-1 uppercase tracking-widest">Toplam Kelime</p>
@@ -136,7 +130,7 @@
                     <div
                         v-for="(w, i) in filteredWords"
                         :key="w.w + '_' + i"
-                        @click="selectedWord = w"
+                        @click="openWord(w)"
                         class="glass p-6 rounded-[32px] hover:border-pink-600 transition cursor-pointer relative group"
                     >
                         <div class="flex justify-between items-start mb-6 gap-4">
@@ -183,7 +177,7 @@
             <div v-if="selectedWord" class="fixed inset-0 flex justify-end z-[1000]">
                 <div @click="selectedWord = null" class="absolute inset-0 bg-black/80 backdrop-blur-md"></div>
 
-                <div class="w-full max-w-2xl glass h-full shadow-2xl flex flex-col z-10 border-l border-white/10 text-white">
+                <div class="w-full max-w-2xl glass h-full min-h-0 shadow-2xl flex flex-col z-10 border-l border-white/10 text-white">
                     <div class="p-10 border-b border-white/5">
                         <div class="flex justify-between items-start gap-4">
                             <div class="flex-1 min-w-0">
@@ -231,7 +225,7 @@
                     </div>
 
                     <div class="flex-1 overflow-y-auto p-10 bg-black/30 space-y-4 scroll-flat">
-                        <p class="text-[10px] font-black opacity-30 uppercase italic">Bu kelimeyi en çok kullanan 10 kullanıcı</p>
+                        <p class="text-[10px] font-black opacity-30 uppercase italic">Bu kelimeyi en çok kullanan 10 kullanıcı</p><div v-if="selectedWordLoading" class="text-xs opacity-50">Yükleniyor...</div>
 
                         <div
                             v-for="(u, i) in getWordUsers(selectedWord)"
@@ -263,6 +257,7 @@
                     rawEvents: [],
                     search: '',
                     selectedWord: null,
+                    selectedWordLoading: false,
                     streamOptions: [],
                     filter: getFilterState(),
                     apiMeta: {},
@@ -280,7 +275,7 @@
                     const q = String(this.search || '').toLowerCase();
                     return this.words
                         .filter(w => String(w.w || '').toLowerCase().includes(q))
-                        .slice(0, 150);
+                        .slice(0, 1000);
                 },
 
                 currentLabel() {
@@ -421,46 +416,24 @@
                     return this.words.findIndex(x => x.w === word.w) + 1;
                 },
 
-                getWordUsers(word) {
-                    if (!word || !word.w) return [];
-
-                    if (Array.isArray(word.top) && word.top.length) {
-                        return word.top.map(entry => {
-                            if (Array.isArray(entry)) {
-                                return {
-                                    name: entry[0] || 'Unknown',
-                                    count: entry[1] || 0
-                                };
-                            }
-
-                            return {
-                                name: entry.name || entry.n || entry.u || entry.username || 'Unknown',
-                                count: entry.count ?? entry.c ?? 0
-                            };
-                        }).slice(0, 10);
-                    }
-
-                    const target = String(word.w).toLowerCase();
-                    const userMap = {};
-
-                    for (const ev of this.rawEvents || []) {
-                        if (ev.event_type !== 'chat') continue;
-
-                        const username = ev.username || 'Unknown';
-                        const msg = String(ev.message || '');
-                        const tokens = msg.split(/\s+/).filter(Boolean);
-
-                        for (const token of tokens) {
-                            const cleaned = normalizeWord(token);
-                            if (cleaned !== target) continue;
-                            userMap[username] = (userMap[username] || 0) + 1;
+                async openWord(word) {
+                    this.selectedWord = { ...word, top: [] };
+                    this.selectedWordLoading = true;
+                    try {
+                        const sid = this.filter.mode === 'stream' ? this.filter.stream_id : '';
+                        const q = `word=${encodeURIComponent(word.w)}${sid ? `&stream_id=${encodeURIComponent(sid)}` : ''}`;
+                        const res = await fetch(`/api/word_detail?${q}`);
+                        const data = await res.json();
+                        if (data.ok) {
+                            this.selectedWord = { ...word, c: data.count, unique_users: data.unique_users, top: data.top_users || [] };
                         }
-                    }
+                    } catch (e) { console.error('Kelime detayı alınamadı', e); }
+                    finally { this.selectedWordLoading = false; }
+                },
 
-                    return Object.entries(userMap)
-                        .map(([name, count]) => ({ name, count }))
-                        .sort((a, b) => b.count - a.count)
-                        .slice(0, 10);
+                getWordUsers(word) {
+                    if (!word || !Array.isArray(word.top)) return [];
+                    return word.top.map(x => ({ name: x.name || x.n || x.u || 'Unknown', count: x.count ?? x.c ?? 0 })).slice(0,10);
                 },
 
                 async fetchStreamsForSelect() {
@@ -486,14 +459,13 @@
 
                         this.stats = result.transformed.stats || {};
                         this.rawEvents = result.transformed.rawEvents || [];
-                        this.words = this.normalizeWords(result.transformed.words || [], this.rawEvents);
+                        this.words = this.normalizeWords((result.transformed.words || []).filter(w => !/^\[?emote:\d+:/i.test(String(w.w || ''))), this.rawEvents);
                         this.apiMeta = result.apiData.meta || {};
 
                         if (this.selectedWord) {
-                            const found = this.words.find(
-                                w => String(w.w || '').toLowerCase() === String(this.selectedWord.w || '').toLowerCase()
-                            );
-                            this.selectedWord = found || null;
+                            const selectedName = String(this.selectedWord.w || '');
+                            const found = this.words.find(w => String(w.w || '').toLowerCase() === selectedName.toLowerCase());
+                            if (found) this.selectedWord = { ...this.selectedWord, c: found.c, unique_users: found.unique_users };
                         }
                     } catch (err) {
                         console.error(err);

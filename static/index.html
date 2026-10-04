@@ -33,27 +33,21 @@
                         <label class="block text-[10px] uppercase font-black opacity-50 mb-2">Veri Modu</label>
                         <select v-model="filterMode" @change="handleModeChange" class="w-full bg-[#0b0f14] text-white border border-white/10 rounded-2xl px-4 py-3 text-sm font-black outline-none appearance-none">
                             <option value="live">Canlı Yayın</option>
-                            <option value="offstream_live">Canlı Offstream</option>
-                            <option value="stream">Yayın Seç</option>
-                            <option value="day">Gün Seç</option>
-                            <option value="offstream_day">Offstream Gün Seç</option>
-                            <option value="week">Son 7 Gün</option>
-                            <option value="month">Ay Seç</option>
-                            <option value="all">Tüm Zamanlar</option>
+                            <option value="stream">Önceki Yayınlar</option>
                         </select>
                     </div>
 
                     <div v-if="filterMode === 'stream'">
                         <label class="block text-[10px] uppercase font-black opacity-50 mb-2">Yayın</label>
                         <select v-model="selectedStreamId" @change="fetchDashboardData" class="w-full bg-[#0b0f14] text-white border border-white/10 rounded-2xl px-4 py-3 text-sm font-black outline-none appearance-none">
-                            <option value="">Yayın seç</option>
+                            <option value="">Önceki yayın seç</option>
                             <option v-for="s in streamOptions" :key="s.id" :value="String(s.id)">
                                 {{ formatStreamLabel(s) }}
                             </option>
                         </select>
                     </div>
 
-                    <div v-if="filterMode === 'day' || filterMode === 'offstream_day'">
+                    <div v-if="false">
                         <label class="block text-[10px] uppercase font-black opacity-50 mb-2">
                             {{ filterMode === 'offstream_day' ? 'Offstream Günü' : 'Gün' }}
                         </label>
@@ -65,7 +59,7 @@
                         >
                     </div>
 
-                    <div v-if="filterMode === 'month'">
+                    <div v-if="false">
                         <label class="block text-[10px] uppercase font-black opacity-50 mb-2">Ay</label>
                         <input
                             v-model="selectedMonth"
@@ -109,7 +103,7 @@
                         <div
                             v-for="u in users.slice(0, 15)"
                             :key="u.n"
-                            @click="selectedUser = u"
+                            @click="openUserByName(u.n)"
                             class="min-w-[240px] glass p-6 rounded-3xl flex-shrink-0 group hover:scale-105 transition cursor-pointer border border-white/10 relative overflow-hidden"
                         >
                             <span class="absolute -right-4 -top-4 text-7xl font-black opacity-5 group-hover:opacity-10">#{{ u.rank }}</span>
@@ -141,7 +135,7 @@
                         MODERASYON ÖZETİ
                     </h4>
 
-                    <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
+                    <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-7 gap-4">
                         <div class="stat-card">
                             <p class="opacity-50 text-xs font-bold mb-1 uppercase tracking-widest">Toplam İşlem</p>
                             <h3 class="text-3xl font-black text-cyan-400">{{ moderationSummary.total_actions || 0 }}</h3>
@@ -161,6 +155,14 @@
                         <div class="stat-card">
                             <p class="opacity-50 text-xs font-bold mb-1 uppercase tracking-widest">Mesaj Silme</p>
                             <h3 class="text-3xl font-black text-pink-400">{{ moderationSummary.deleted_messages || 0 }}</h3>
+                        </div>
+                        <div class="stat-card">
+                            <p class="opacity-50 text-xs font-bold mb-1 uppercase tracking-widest">Subscription</p>
+                            <h3 class="text-3xl font-black text-purple-400">{{ stats.subscriptions || 0 }}</h3>
+                        </div>
+                        <div class="stat-card">
+                            <p class="opacity-50 text-xs font-bold mb-1 uppercase tracking-widest">Gift Sub</p>
+                            <h3 class="text-3xl font-black text-emerald-400">{{ stats.gift_subscriptions || 0 }}</h3>
                         </div>
                     </div>
                 </div>
@@ -338,8 +340,8 @@
             <div v-if="selectedUser" class="fixed inset-0 flex justify-end z-[1000]">
                 <div @click="selectedUser = null" class="absolute inset-0 bg-black/80 backdrop-blur-md"></div>
 
-                <div class="w-full max-w-2xl glass h-full shadow-2xl flex flex-col z-10 border-l border-white/10 text-white">
-                    <div class="p-10 border-b border-white/5">
+                <div class="w-full max-w-2xl glass h-full min-h-0 shadow-2xl flex flex-col z-10 border-l border-white/10 text-white">
+                    <div class="p-10 border-b border-white/5 shrink-0 max-h-[52vh] overflow-y-auto scroll-flat">
                         <div class="flex justify-between items-start gap-4">
                             <div class="flex-1 min-w-0">
                                 <span class="text-pink-500 font-black text-xs uppercase italic">İzleyici Detayı</span>
@@ -384,7 +386,7 @@
                         </div>
                     </div>
 
-                    <div class="flex-1 overflow-y-auto p-10 bg-black/30 space-y-4 scroll-flat">
+                    <div ref="userMessageScroller" @scroll.passive="onUserMessagesScroll" class="flex-1 min-h-0 overflow-y-auto p-10 bg-black/30 space-y-4 scroll-flat">
                         <p class="text-[10px] font-black opacity-30 uppercase italic">Son Mesajları</p>
 
                         <div
@@ -396,9 +398,10 @@
                             <p v-html="parseMessage(log.m)"></p>
                         </div>
 
-                        <div v-if="!(selectedUser.logs || []).length" class="opacity-40 text-sm">
-                            Son mesaj kaydı bulunamadı.
-                        </div>
+                        <div v-if="userMessagesLoading" class="text-center text-xs opacity-50 py-4">Eski mesajlar yükleniyor…</div>
+                        <div v-if="!(selectedUser.logs || []).length && !selectedUser.loadingDetail" class="opacity-40 text-sm">Son mesaj kaydı bulunamadı.</div>
+                        <div v-if="!(selectedUser.logs || []).length && selectedUser.loadingDetail" class="text-center text-xs opacity-50 py-4">Veriler yükleniyor…</div>
+                        <div v-if="selectedUser.logs?.length && !userMessagesHasMore && !userMessagesLoading" class="text-center text-[10px] opacity-25 py-4 uppercase tracking-widest">Bu kullanıcı için kayıtların başlangıcına ulaşıldı</div>
                     </div>
                 </div>
             </div>
@@ -440,7 +443,11 @@
                     apiMeta: {},
                     selectedStream: null,
                     loading: false,
-                    autoRefreshTimer: null
+                    autoRefreshTimer: null,
+                    userMessagesLoading: false,
+                    userMessagesNextCursor: null,
+                    userMessagesHasMore: false,
+                    userDetailRequestToken: 0
                 };
             },
 
@@ -513,10 +520,51 @@
                     return `${date} ${suffix} · ${started}`;
                 },
 
-                openUserByName(name) {
+                async openUserByName(name) {
                     const found = this.users.find(u => (u.n || '').toLowerCase() === String(name || '').toLowerCase());
-                    if (found) this.selectedUser = found;
+                    if (!found) return;
+                    this.selectedUser = { ...found, tw: [], te: [], logs: [], loadingDetail: true };
+                    this.userMessagesNextCursor = null;
+                    this.userMessagesHasMore = false;
+                    const token=++this.userDetailRequestToken;
+                    try {
+                        const sid = this.filterMode === 'stream' ? this.selectedStreamId : '';
+                        const q = `username=${encodeURIComponent(found.n)}${sid ? `&stream_id=${encodeURIComponent(sid)}` : ''}`;
+                        const r = await fetch(`/api/user_detail?${q}`);
+                        const d = await r.json();
+                        if (!d.ok || token !== this.userDetailRequestToken) return;
+                        this.selectedUser = { ...found, tw: (d.words || []).map(x => ({w:x.word,c:x.count})), te: (d.emotes || []).map(x => ({id:x.id,n:x.n,c:x.c})), logs: (d.messages || []).map(x => ({id:x.id,t:x.timestamp,m:x.message})), mod_received: d.mod_received || found.mod_received || {}, mod_history_received: d.mod_history_received || [], loadingDetail:false };
+                        this.userMessagesNextCursor=d.next_cursor ?? null;
+                        this.userMessagesHasMore=!!d.next_cursor;
+                        await this.$nextTick();
+                        const el=this.$refs.userMessageScroller;
+                        if (el) el.scrollTop=el.scrollHeight;
+                    } catch(e) { console.error('Kullanıcı detayı alınamadı',e); if (this.selectedUser) this.selectedUser={...this.selectedUser,loadingDetail:false}; }
                 },
+
+                async loadMoreUserMessages() {
+                    if (!this.selectedUser || this.userMessagesLoading || !this.userMessagesHasMore || this.userMessagesNextCursor == null) return;
+                    const el=this.$refs.userMessageScroller;
+                    const prevHeight=el?.scrollHeight || 0; const prevTop=el?.scrollTop || 0;
+                    this.userMessagesLoading=true;
+                    try {
+                        const params=new URLSearchParams({username:this.selectedUser.n,before_id:String(this.userMessagesNextCursor),limit:'100'});
+                        if (this.filterMode==='stream' && this.selectedStreamId) params.set('stream_id',this.selectedStreamId);
+                        const r=await fetch(`/api/user_messages?${params.toString()}`); const d=await r.json();
+                        if (!d.ok) return;
+                        const older=(d.messages||[]).map(x=>({id:x.id,t:x.timestamp,m:x.message}));
+                        const existing=new Set((this.selectedUser.logs||[]).map(x=>String(x.id)));
+                        const fresh=older.filter(x=>!existing.has(String(x.id)));
+                        this.selectedUser={...this.selectedUser,logs:[...fresh,...(this.selectedUser.logs||[])]};
+                        this.userMessagesNextCursor=d.next_cursor ?? null;
+                        this.userMessagesHasMore=!!d.next_cursor && older.length>0;
+                        await this.$nextTick();
+                        const nextEl=this.$refs.userMessageScroller;
+                        if(nextEl) nextEl.scrollTop=prevTop+(nextEl.scrollHeight-prevHeight);
+                    } catch(e){console.error('Eski mesajlar alınamadı',e);} finally{this.userMessagesLoading=false;}
+                },
+
+                onUserMessagesScroll(event){ if(event?.target && event.target.scrollTop<180) this.loadMoreUserMessages(); },
 
                 async fetchStreams() {
                     try {
@@ -528,32 +576,11 @@
                 },
 
                 buildApiUrl() {
-                    if (this.filterMode === 'live') {
-                        return '/api/data?mode=live';
-                    }
-                    if (this.filterMode === 'offstream_live') {
-                        return '/api/data?mode=offstream_live';
-                    }
-                    if (this.filterMode === 'stream') {
-                        if (!this.selectedStreamId) return null;
+                    if (this.filterMode === 'live') return '/api/data?mode=live';
+                    if (this.filterMode === 'stream' && this.selectedStreamId) {
                         return `/api/data?mode=stream&stream_id=${encodeURIComponent(this.selectedStreamId)}`;
                     }
-                    if (this.filterMode === 'day') {
-                        if (!this.selectedDate) return null;
-                        return `/api/data?mode=day&date=${encodeURIComponent(this.selectedDate)}`;
-                    }
-                    if (this.filterMode === 'offstream_day') {
-                        if (!this.selectedDate) return null;
-                        return `/api/data?mode=offstream_day&date=${encodeURIComponent(this.selectedDate)}`;
-                    }
-                    if (this.filterMode === 'week') {
-                        return '/api/data?mode=week';
-                    }
-                    if (this.filterMode === 'month') {
-                        if (!this.selectedMonth) return null;
-                        return `/api/data?mode=month&month=${encodeURIComponent(this.selectedMonth)}`;
-                    }
-                    return '/api/data?mode=all';
+                    return '/api/data?mode=live';
                 },
 
                 syncFilterState() {
@@ -582,6 +609,7 @@
 
                         const transformed = transformApiData(data);
 
+                        const selectedName = this.selectedUser?.n || '';
                         this.stats = transformed.stats || {};
                         this.users = transformed.users || [];
                         this.words = transformed.words || [];
@@ -595,7 +623,10 @@
 
                         this.apiMeta = data.meta || {};
                         this.selectedStream = data.stream || null;
-                        this.selectedUser = null;
+                        if (selectedName) {
+                            const found = this.users.find(u => String(u.n || '').toLowerCase() === String(selectedName).toLowerCase());
+                            if (found && this.selectedUser) this.selectedUser = mergeUserSummaryPreservingDetail(this.selectedUser, found);
+                        }
                     } catch (err) {
                         console.error(err);
                         alert('API verisi okunamadı.');
@@ -620,7 +651,7 @@
                         this.autoRefreshTimer = null;
                     }
 
-                    if (this.filterMode === 'live' || this.filterMode === 'offstream_live') {
+                    if (this.filterMode === 'live') {
                         this.autoRefreshTimer = setInterval(() => {
                             this.fetchDashboardData();
                         }, 5000);

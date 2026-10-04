@@ -1,8 +1,40 @@
+/* Global API loading indicator: all pages show a small non-blocking loader while API requests are in flight. */
+(function installGlobalDataLoader() {
+    if (window.__kickGlobalLoaderInstalled) return;
+    window.__kickGlobalLoaderInstalled = true;
+    const style = document.createElement('style');
+    style.textContent = `
+        #global-data-loader { position: fixed; inset: 0; pointer-events: none; z-index: 5000; opacity: 0; transition: opacity .15s ease; }
+        #global-data-loader.active { opacity: 1; }
+        #global-data-loader .bar { position: absolute; top: 0; left: 0; height: 3px; width: 35%; background: linear-gradient(90deg, transparent, #e91e63, #22d3ee, transparent); animation: kickLoader 1s ease-in-out infinite; box-shadow: 0 0 16px rgba(233,30,99,.6); }
+        #global-data-loader .label { position: absolute; top: 14px; right: 16px; background: rgba(8,10,14,.94); border: 1px solid rgba(255,255,255,.09); border-radius: 999px; padding: 7px 11px; color: rgba(255,255,255,.8); font: 800 10px/1 Inter, sans-serif; letter-spacing: .06em; text-transform: uppercase; backdrop-filter: blur(10px); }
+        @keyframes kickLoader { 0% { transform: translateX(-120%); } 100% { transform: translateX(320%); } }
+    `;
+    document.head.appendChild(style);
+    const el = document.createElement('div');
+    el.id = 'global-data-loader';
+    el.innerHTML = '<div class="bar"></div><div class="label">Veriler yükleniyor…</div>';
+    document.body.appendChild(el);
+    let pending = 0;
+    const update = () => el.classList.toggle('active', pending > 0);
+    const nativeFetch = window.fetch.bind(window);
+    window.fetch = async function(input, init) {
+        const url = typeof input === 'string' ? input : (input?.url || '');
+        const tracked = String(url).includes('/api/');
+        if (tracked) { pending += 1; update(); }
+        try { return await nativeFetch(input, init); }
+        finally { if (tracked) { pending = Math.max(0, pending - 1); update(); } }
+    };
+})();
+
+function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>\"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]));
+}
+
 function parseMessage(msg) {
-    return String(msg || '').replace(
+    return escapeHtml(msg).replace(
         /\[emote:(\d+):([^\]]+)\]/g,
-        (match, id, name) =>
-            `<img src="https://files.kick.com/emotes/${id}/fullsize" class="chat-emote" title="${name}">`
+        (match, id, name) => `<img src=\"https://files.kick.com/emotes/${id}/fullsize\" class=\"chat-emote inline-block align-middle mx-0.5 h-7 w-7 object-contain\" title=\"${escapeHtml(name)}\" alt=\"${escapeHtml(name)}\" loading=\"lazy\" onerror=\"this.style.display='none'\">`
     );
 }
 
@@ -28,10 +60,9 @@ function getFilterState() {
         if (!raw) return getDefaultFilterState();
 
         const parsed = JSON.parse(raw);
-        return {
-            ...getDefaultFilterState(),
-            ...parsed
-        };
+        const merged = { ...getDefaultFilterState(), ...parsed };
+        if (!['live','stream'].includes(String(merged.mode))) merged.mode = 'live';
+        return merged;
     } catch (e) {
         return getDefaultFilterState();
     }
@@ -42,6 +73,7 @@ function setFilterState(nextState) {
         ...getDefaultFilterState(),
         ...nextState
     };
+    if (!['live','stream'].includes(String(merged.mode))) merged.mode = 'live';
     localStorage.setItem(RR_FILTER_KEY, JSON.stringify(merged));
     return merged;
 }
@@ -119,7 +151,7 @@ function getReadableFilterLabel(filter, apiMeta = null, selectedStream = null) {
         if (selectedStream?.label_date) {
             return `${formatHumanDate(selectedStream.label_date)} ${selectedStream.session_type === 'offstream' ? 'offstream' : 'yayını'}`;
         }
-        return 'Yayın seç';
+        return 'Önceki yayın seç';
     }
     if (mode === 'day') return f?.date ? `${formatHumanDate(f.date)} verisi` : 'Gün seç';
     if (mode === 'offstream_day') return f?.date ? `${formatHumanDate(f.date)} offstream` : 'Offstream gün seç';
@@ -146,6 +178,30 @@ function getReadableFilterLabel(filter, apiMeta = null, selectedStream = null) {
     if (mode === 'all') return 'Tüm veriler';
 
     return 'Seçili veri';
+}
+
+function mergeUserSummaryPreservingDetail(detail, summary) {
+    if (!detail) return summary;
+    const merged = { ...detail, ...summary };
+
+    // Dashboard refreshes return lightweight user summaries with empty
+    // tw/te/logs arrays. Never let those summary fields erase an open
+    // user's already-loaded detail modal.
+    for (const key of ['tw', 'te', 'logs', 'mod_history_received']) {
+        if (Object.prototype.hasOwnProperty.call(detail, key)) {
+            merged[key] = detail[key];
+        }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(detail, 'loadingDetail')) {
+        merged.loadingDetail = detail.loadingDetail;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(detail, 'mod_received')) {
+        merged.mod_received = detail.mod_received;
+    }
+
+    return merged;
 }
 
 function buildModerationFromEvents(events) {
@@ -286,10 +342,10 @@ function buildUsersFromSummary(summaryUsers, events) {
         usersMap[username] = {
             n: username,
             mc: u.messages || u.mc || 0,
-            wc: 0,
-            ec: 0,
-            tw: [],
-            te: [],
+            wc: u.wc || u.word_count || 0,
+            ec: u.ec || u.emote_count || 0,
+            tw: u.tw || [],
+            te: u.te || [],
             logs: [],
             mod_received: u.mod_received || {
                 timeouts: 0,
@@ -326,49 +382,14 @@ function buildUsersFromSummary(summaryUsers, events) {
         const user = usersMap[ev.username];
         const msg = String(ev.message || '');
 
-        user.logs.unshift({
-            t: ev.timestamp || '',
-            m: msg
-        });
-
+        user.logs.unshift({ t: ev.timestamp || '', m: msg });
         if (user.logs.length > 20) user.logs.pop();
 
-        const localWords = {};
-        const tokens = msg.split(/\s+/).filter(Boolean);
-
-        for (const token of tokens) {
-            const cleaned = normalizeWord(token);
-            if (cleaned.length >= 2) {
-                user.wc += 1;
-                localWords[cleaned] = (localWords[cleaned] || 0) + 1;
-            }
-
-            const emojiMatches = token.match(/\[emote:(\d+):([^\]]+)\]/g);
-            if (emojiMatches) {
-                for (const raw of emojiMatches) {
-                    const m = raw.match(/\[emote:(\d+):([^\]]+)\]/);
-                    if (m) {
-                        user.ec += 1;
-                    }
-                }
-            }
-        }
-
-        for (const [k, v] of Object.entries(localWords)) {
-            if (!user.__wordMap) user.__wordMap = {};
-            user.__wordMap[k] = (user.__wordMap[k] || 0) + v;
-        }
+        // Counts come from indexed aggregate tables. The raw event pass is only
+        // used for the recent-message preview, avoiding double counting.
     }
 
-    const result = Object.values(usersMap).map((u) => {
-        const wordMap = u.__wordMap || {};
-        u.tw = Object.entries(wordMap)
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 8);
-
-        delete u.__wordMap;
-        return u;
-    });
+    const result = Object.values(usersMap).map((u) => u);
 
     result.sort((a, b) => b.mc - a.mc);
     result.forEach((u, i) => u.rank = i + 1);
@@ -419,30 +440,16 @@ function transformApiData(apiData) {
 }
 
 async function loadDashboardData(customFilter = null) {
-    const filter = customFilter || getFilterState();
+    const filter = { ...(customFilter || getFilterState()) };
+    if (!['live','stream'].includes(String(filter.mode))) filter.mode = 'live';
 
-    let url = '/api/data?mode=all';
+    let url = '/api/data?mode=live';
 
     if (filter.mode === 'live') {
         url = '/api/data?mode=live';
-    } else if (filter.mode === 'offstream_live') {
-        url = '/api/data?mode=offstream_live';
     } else if (filter.mode === 'stream') {
         if (!filter.stream_id) throw new Error('stream_id gerekli');
         url = `/api/data?mode=stream&stream_id=${encodeURIComponent(filter.stream_id)}`;
-    } else if (filter.mode === 'day') {
-        if (!filter.date) throw new Error('date gerekli');
-        url = `/api/data?mode=day&date=${encodeURIComponent(filter.date)}`;
-    } else if (filter.mode === 'offstream_day') {
-        if (!filter.date) throw new Error('date gerekli');
-        url = `/api/data?mode=offstream_day&date=${encodeURIComponent(filter.date)}`;
-    } else if (filter.mode === 'week') {
-        url = '/api/data?mode=week';
-    } else if (filter.mode === 'month') {
-        if (!filter.month) throw new Error('month gerekli');
-        url = `/api/data?mode=month&month=${encodeURIComponent(filter.month)}`;
-    } else if (filter.mode === 'all') {
-        url = '/api/data?mode=all';
     }
 
     const res = await fetch(url);

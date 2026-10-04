@@ -58,3 +58,4 @@ select option{
     background:#0b0f14;
     color:white;
 }
+#app, #app > main, main > section, main > div { min-height: 0; }

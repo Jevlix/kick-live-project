@@ -1,546 +1,353 @@
 import asyncio
 import json
-from datetime import datetime
+import re
+from datetime import datetime, timezone
 
 import websockets
 
-from db import (
-    add_event,
-    get_active_stream,
-    get_or_create_today_offstream,
-    LOGS_DIR,
+from config import (
+    CHANNEL_SLUG, DB_BATCH_SIZE, DB_BATCH_WAIT_MS, LOGS_DIR,
+    MAX_JSONL_MB, PRINT_CHAT, PUSHER_WS_URL, RECONNECT_DELAY_SECONDS,
+    RAW_JSON_IN_DB, LOG_OFFSTREAM_CHAT,
 )
-from stream_manager import (
-    STREAMER_NAME,
-    CHATROOM_ID,
-    CHANNEL_ID,
-    ensure_live_stream,
-    update_last_event,
-    update_socket_message_time,
-    set_socket_connected,
-    monitor_stream_status,
-)
-
-KICK_PUSHER_KEY = "32cbd69e4b950bf97679"
-KICK_WS_URL = f"wss://ws-us2.pusher.com/app/{KICK_PUSHER_KEY}?protocol=7&client=js&version=8.4.0&flash=false"
-
-MAX_FILE_SIZE = 200 * 1024 * 1024
-BATCH_SIZE = 50
-RECONNECT_DELAY = 5
-FORCE_LIVE_CHECK_EVERY_SECONDS = 20
+from db import BatchWriter, connect, get_active_stream, init_db
+from kick_api import KickAPI
+from stream_manager import ensure_live_stream, get_channel_meta, get_chatroom_id
 
 
 class KickRecorder:
     def __init__(self):
-        self.queue = asyncio.Queue()
         self.running = True
-        self.file_index_map = {}
-        self.last_forced_live_check_ts = 0.0
+        self.queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=10000)
+        self.recent_message_ids: dict[str, float] = {}
+        self.last_user_message: dict[str, str] = {}
+        self.file_index: dict[int, int] = {}
+        self.stats = {'received': 0, 'chat': 0, 'stored': 0, 'duplicates': 0, 'errors': 0}
+        self.stop_event = asyncio.Event()
+        self.on_event = None
 
-        self.stats = {
-            "chat_messages": 0,
-            "deleted_messages": 0,
-            "timeouts": 0,
-            "bans": 0,
-            "unbans": 0,
-            "subscriptions": 0,
-            "gift_subscriptions": 0,
-            "other_events": 0,
-            "stream_events": 0,
-            "offstream_events": 0,
-        }
+    @staticmethod
+    def parse_data(raw):
+        data = raw.get('data')
+        if isinstance(data, str):
+            try: return json.loads(data)
+            except json.JSONDecodeError: return None
+        return data if isinstance(data, dict) else None
 
-    def safe_get_first(self, obj, *paths, default=None):
+    @staticmethod
+    def event_name(event: str) -> str:
+        return (event or '').split('\\')[-1].split('.')[-1] or 'UnknownEvent'
+
+    @staticmethod
+    def first(obj, *paths, default=None):
         for path in paths:
-            current = obj
+            cur = obj
             ok = True
             for key in path:
-                if isinstance(current, dict) and key in current:
-                    current = current[key]
+                if isinstance(cur, dict) and key in cur:
+                    cur = cur[key]
                 else:
-                    ok = False
-                    break
-            if ok and current not in (None, "", {}, []):
-                return current
+                    ok = False; break
+            if ok and cur not in (None, ''):
+                return cur
         return default
 
-    def extract_event_name(self, event_type):
-        if not event_type:
-            return "UnknownEvent"
+    @staticmethod
+    def words(text: str):
+        # Emote codes are visual tokens, not natural-language words.
+        # Keep normal words only; strip URLs and punctuation without destroying Unicode.
+        out = []
+        for token in re.findall(r"[^\s]+", text or ''):
+            if re.fullmatch(r"\[?emote:\d+:[^\]\s]+\]?", token, flags=re.I):
+                continue
+            if token.startswith(('http://','https://')):
+                continue
+            token = token.strip('.,!?;:()[]{}<>\"\'').lower()
+            if len(token) >= 2 and any(c.isalnum() for c in token):
+                out.append(token[:80])
+        return out
 
-        s = str(event_type)
-        if "\\" in s:
-            s = s.split("\\")[-1]
-        if "." in s:
-            s = s.split(".")[-1]
-        return s or "UnknownEvent"
+    @staticmethod
+    def emotes(text: str):
+        return [{'id': m.group(1), 'name': m.group(2)} for m in re.finditer(r'\[?emote:(\d+):([^\]\s]+)\]?', text or '', flags=re.I)]
 
-    def get_session_log_path(self, session_id: int, label_date: str, session_type: str):
-        file_index = self.file_index_map.get((session_type, session_id), 1)
+    def session(self):
+        active = get_active_stream()
+        if active:
+            return active['id'], active['label_date'], 'stream'
+        return None, datetime.now(timezone.utc).strftime('%Y-%m-%d'), 'stream'
 
-        if session_type == "offstream":
-            filename = f"kick_logs_{STREAMER_NAME}_{label_date}_offstream{session_id}_part{file_index}.jsonl"
-        else:
-            filename = f"kick_logs_{STREAMER_NAME}_{label_date}_stream{session_id}_part{file_index}.jsonl"
+    def log_path(self, sid, label_date, session_type):
+        idx = self.file_index.get(sid, 1)
+        name = f'kick_{CHANNEL_SLUG}_{label_date}_{session_type}{sid}_part{idx}.jsonl'
+        return LOGS_DIR / name
 
-        return LOGS_DIR / filename
+    def rotate_if_needed(self, sid, label_date, session_type):
+        path = self.log_path(sid, label_date, session_type)
+        if path.exists() and path.stat().st_size >= MAX_JSONL_MB * 1024 * 1024:
+            self.file_index[sid] = self.file_index.get(sid, 1) + 1
 
-    def rotate_log_if_needed(self, session_id: int, label_date: str, session_type: str):
-        path = self.get_session_log_path(session_id, label_date, session_type)
+    def normalize_event(self, data, event_name, timestamp=None):
+        timestamp = timestamp or datetime.now(timezone.utc).isoformat()
+        sender = data.get('sender') or data.get('user') or data.get('subscriber') or data.get('gifter') or {}
+        username = self.first(data, ('sender','username'), ('user','username'), ('subscriber','username'), ('gifter','username'), ('gifter_username',))
+        user_id = self.first(data, ('sender','user_id'), ('sender','id'), ('user','id'), ('user','user_id'), ('subscriber','user_id'), ('gifter','user_id'))
+        profile = self.first(data, ('sender','profile_picture'), ('user','profile_picture'), ('subscriber','profile_picture'), ('gifter','profile_picture'))
+        entry = {
+            't': timestamp, 'e': event_name, 'type': 'other', 'user': username,
+            'user_id': user_id, 'display_name': sender.get('username') if isinstance(sender, dict) else username,
+            'profile_picture': profile, 'keep_raw': RAW_JSON_IN_DB, 'raw': data,
+        }
+        name = (event_name or '').lower()
 
-        if path.exists() and path.stat().st_size >= MAX_FILE_SIZE:
-            key = (session_type, session_id)
-            self.file_index_map[key] = self.file_index_map.get(key, 1) + 1
-            new_path = self.get_session_log_path(session_id, label_date, session_type)
-            print(f"[!] Yeni log part dosyası: {new_path.name}")
+        if 'chatmessageevent' in name or name in ('chatmessage', 'message'):
+            message_obj = data.get('message') if isinstance(data.get('message'), dict) else {}
+            content = data.get('content') or message_obj.get('content') or ''
+            if not isinstance(content, str):
+                content = str(content or '')
+            mid = data.get('message_id') or data.get('chatId') or data.get('id') or message_obj.get('id')
+            reply = data.get('replies_to') or {}
 
-    async def file_writer_worker(self):
-        print("[*] DB + raw log yazıcı başlatıldı.")
-        batch = []
+            # Kick currently sends emotes as {emote_id, positions}; the name is still
+            # present in the [emote:id:name] text, so merge both sources.
+            text_emotes = self.emotes(content)
+            names_by_id = {str(x['id']): x['name'] for x in text_emotes}
+            payload_emotes = data.get('emotes') if isinstance(data.get('emotes'), list) else []
+            norm_ems = []
+            seen = set()
+            for em in payload_emotes:
+                if not isinstance(em, dict):
+                    continue
+                eid = em.get('id') or em.get('emote_id')
+                if eid is None:
+                    continue
+                eid = str(eid)
+                ename = names_by_id.get(eid) or em.get('name') or em.get('emote_name') or f'emote{eid}'
+                # positions can contain multiple occurrences of the same emote.
+                positions = em.get('positions') or [None]
+                for _ in positions:
+                    key = (eid, str(ename), len(norm_ems))
+                    norm_ems.append({'id': eid, 'name': str(ename)})
+            if not norm_ems:
+                norm_ems = text_emotes
 
-        while self.running or not self.queue.empty():
+            entry.update({
+                'type': 'chat', 'msg': content, 'message_id': mid,
+                'reply_to_message_id': reply.get('message_id') if isinstance(reply, dict) else None,
+                'emotes': norm_ems, 'words': self.words(content)
+            })
+            if username and content:
+                key = str(username).lower()
+                state = self.last_user_message.get(key) or {'msg': None, 'repeat': 0}
+                if state.get('msg') == content:
+                    state['repeat'] = int(state.get('repeat', 1)) + 1
+                else:
+                    state = {'msg': content, 'repeat': 1}
+                self.last_user_message[key] = state
+                if state['repeat'] >= 3:
+                    entry['spam_key'] = content.strip().lower()[:500]
+                    entry['spam_repeat_count'] = state['repeat']
+            return entry
+
+        if 'messagedeletedevent' in name or 'chatmessagedeleted' in name or 'messagedeleted' in name:
+            msg=data.get('message') or data.get('deleted_message') or {}
+            mod=data.get('deleted_by') or data.get('moderator') or data.get('mod_user') or data.get('actor') or data.get('user') or {}
+            target=msg.get('sender') if isinstance(msg,dict) else {}
+            entry.update({'type':'deleted','msg':msg.get('content') if isinstance(msg,dict) else data.get('content'),
+                          'message_id':(msg.get('id') if isinstance(msg,dict) else None) or data.get('message_id') or data.get('id'),
+                          'target_user':target.get('username') if isinstance(target,dict) else self.first(data,('target_user','username')),
+                          'mod':mod.get('username') if isinstance(mod,dict) else mod or 'Kick/System'})
+            return entry
+
+        if 'userbannedevent' in name or 'moderationbanned' in name or 'timeout' in name or name.endswith('banned'):
+            target=data.get('banned_user') or data.get('target_user') or data.get('user') or {}
+            mod=data.get('moderator') or data.get('banned_by') or data.get('banned_by_user') or data.get('mod_user') or data.get('actor') or {}
+            md=data.get('metadata') or {}
+            expires=md.get('expires_at') or data.get('expires_at')
+            duration=data.get('duration') or data.get('duration_seconds')
+            if duration is None and expires and md.get('created_at'):
+                try: duration=max(0,int((datetime.fromisoformat(expires.replace('Z','+00:00'))-datetime.fromisoformat(md['created_at'].replace('Z','+00:00'))).total_seconds()))
+                except Exception: pass
+            permanent=(expires in (None, '', 'null') and duration in (None, '', 0, '0'))
+            entry.update({'type':'ban' if permanent else 'timeout',
+                          'target_user':target.get('username') if isinstance(target,dict) else target,
+                          'user':target.get('username') if isinstance(target,dict) else target,
+                          'mod':mod.get('username') if isinstance(mod,dict) else mod,
+                          'reason':md.get('reason') or data.get('reason'), 'duration':duration,
+                          'permanent':1 if permanent else 0})
+            return entry
+
+        if 'userunbannedevent' in name or 'moderationunbanned' in name or 'unban' in name or 'unmute' in name:
+            target=data.get('unbanned_user') or data.get('user') or data.get('target_user') or {}
+            mod=data.get('unbanned_by') or data.get('moderator') or data.get('unbanned_by_user') or data.get('mod_user') or data.get('actor') or {}
+            entry.update({'type':'unban','target_user':target.get('username') if isinstance(target,dict) else target,
+                          'mod':mod.get('username') if isinstance(mod,dict) else mod})
+            return entry
+
+        if ('subscriptionevent' in name or 'subscriptioncreatedevent' in name or 'channelsubscriptionevent' in name
+                or name in ('subscription', 'newsubscription', 'subscriptioncreated', 'channelsubscription')):
+            sub = data.get('subscriber') or data.get('user') or data.get('sender') or {}
+            sub_name = sub.get('username') if isinstance(sub, dict) else sub
+            entry.update({'type':'subscription','user':sub_name or username,'duration':data.get('months') or data.get('duration') or data.get('duration_months')})
+            return entry
+        if ('giftedsubscriptions' in name or 'subscriptionsgift' in name or 'subscriptiongift' in name
+                or name in ('giftedsubscriptionsevent','giftsubscriptionsevent','channelsubscriptiongifts')):
+            gifter = data.get('gifter') or data.get('user') or data.get('sender') or {}
+            gifter_name = gifter.get('username') if isinstance(gifter, dict) else gifter
+            giftees = data.get('giftees') or data.get('gifted_usernames') or data.get('recipients') or []
+            gift_count = len(giftees) if isinstance(giftees, list) else int(data.get('gift_count') or data.get('quantity') or 1)
+            entry.update({'type':'gift_sub','gift_count':max(1,gift_count), 'quantity':max(1,gift_count), 'user':gifter_name or username, 'gifter':gifter_name or username})
+            return entry
+        if 'followevent' in name or 'followed' in name:
+            entry['type']='follow'; return entry
+        if 'streamhostevent' in name:
+            entry['type']='host'; return entry
+
+        # Defensive normalization for Kick/Pusher names that may change while payload shapes stay stable.
+        if data.get('giftees') is not None or data.get('gifter') is not None:
+            gifter = data.get('gifter') or {}
+            giftees = data.get('giftees') or []
+            entry.update({'type':'gift_sub','user':gifter.get('username') if isinstance(gifter,dict) else gifter, 'gift_count':len(giftees) if isinstance(giftees,list) else 1, 'quantity':len(giftees) if isinstance(giftees,list) else 1})
+            return entry
+        if data.get('subscriber') is not None and ('sub' in name or 'subscription' in name):
+            sub = data.get('subscriber') or {}
+            entry.update({'type':'subscription','user':sub.get('username') if isinstance(sub,dict) else sub, 'duration':data.get('duration')})
+            return entry
+        return entry
+
+    async def enqueue(self, entry):
+        sid, date_label, session_type = self.session()
+        if sid is None:
+            meta = await asyncio.to_thread(get_channel_meta)
+            if meta and meta.get('is_live'):
+                sid = await asyncio.to_thread(ensure_live_stream, meta)
+                if sid:
+                    session_type = 'stream'
+        if sid is None:
+            # v5 stores only actual livestream sessions. Chatroom traffic while offline is ignored.
+            return
+        entry['stream_id'] = sid
+        entry['stream_label_date'] = date_label
+        entry['session_type'] = session_type
+        await self.queue.put(entry)
+        if self.on_event:
             try:
+                result = self.on_event(entry)
+                if asyncio.iscoroutine(result):
+                    await result
+            except Exception:
+                pass
+
+    async def writer_worker(self):
+        conn = connect()
+        writer = BatchWriter(conn)
+        batch = []
+        print(f'[DB] Batch writer hazır. batch={DB_BATCH_SIZE}')
+        try:
+            while self.running or not self.queue.empty():
                 try:
-                    item = await asyncio.wait_for(self.queue.get(), timeout=1.0)
+                    item = await asyncio.wait_for(self.queue.get(), timeout=DB_BATCH_WAIT_MS / 1000)
                     batch.append(item)
                 except asyncio.TimeoutError:
                     pass
+                if not batch:
+                    continue
+                if len(batch) < DB_BATCH_SIZE and not self.queue.empty():
+                    continue
+                try:
+                    for e in batch:
+                        self.rotate_if_needed(e['stream_id'], e['stream_label_date'], e['session_type'])
+                        path = self.log_path(e['stream_id'], e['stream_label_date'], e['session_type'])
+                        with path.open('a', encoding='utf-8') as f:
+                            f.write(json.dumps(e, ensure_ascii=False, separators=(',', ':')) + '\n')
+                    writer.write_batch(batch)
+                    self.stats['stored'] += len(batch)
+                    for _ in batch: self.queue.task_done()
+                    batch.clear()
+                except Exception as e:
+                    self.stats['errors'] += 1
+                    print(f'[DB] batch yazma hatası: {e}')
+                    await asyncio.sleep(1)
+        finally:
+            if batch:
+                writer.write_batch(batch)
+            conn.close()
+            print('[DB] Writer kapandı.')
 
-                if len(batch) >= BATCH_SIZE or (batch and self.queue.empty()):
-                    for entry in batch:
-                        session_id = entry["stream_id"]
-                        label_date = entry["stream_label_date"]
-                        session_type = entry.get("session_type", "stream")
 
-                        self.rotate_log_if_needed(session_id, label_date, session_type)
-                        path = self.get_session_log_path(session_id, label_date, session_type)
-
-                        with open(path, "a", encoding="utf-8") as f:
-                            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-
-                        add_event(
-                            stream_id=session_id,
-                            timestamp=entry["t"],
-                            event_name=entry["e"],
-                            event_type=entry.get("type"),
-                            username=entry.get("user"),
-                            target_username=entry.get("target_user"),
-                            moderator=entry.get("mod"),
-                            message=entry.get("msg"),
-                            reason=entry.get("reason"),
-                            duration=entry.get("duration"),
-                            permanent=1 if entry.get("permanent") else 0,
-                            session_type=session_type,
-                            raw_json=json.dumps(entry.get("raw", {}), ensure_ascii=False)
-                        )
-
-                    for _ in range(len(batch)):
-                        self.queue.task_done()
-
-                    batch = []
-
-            except Exception as e:
-                print(f"[YAZICI HATASI] {e}")
-                await asyncio.sleep(2)
-
-        print("[*] Yazıcı kapandı.")
-
-    async def stream_watchdog(self):
+    async def _monitor_task(self):
+        from stream_manager import monitor_once
         while self.running:
             try:
-                await asyncio.to_thread(monitor_stream_status)
+                await asyncio.to_thread(monitor_once)
             except Exception as e:
-                print(f"[WATCHDOG HATASI] {e}")
-            await asyncio.sleep(60)
-
-    async def _resolve_session_for_entry(self):
-        active = get_active_stream()
-        if active:
-            return {
-                "stream_id": active["id"],
-                "stream_label_date": active["label_date"],
-                "session_type": active["session_type"] if active["session_type"] else "stream",
-            }
-
-        now_ts = asyncio.get_running_loop().time()
-        should_force = (now_ts - self.last_forced_live_check_ts) >= FORCE_LIVE_CHECK_EVERY_SECONDS
-
-        if should_force:
-            self.last_forced_live_check_ts = now_ts
-            await asyncio.to_thread(ensure_live_stream, True)
-
-        active = get_active_stream()
-        if active:
-            return {
-                "stream_id": active["id"],
-                "stream_label_date": active["label_date"],
-                "session_type": active["session_type"] if active["session_type"] else "stream",
-            }
-
-        offstream_id = await asyncio.to_thread(
-            get_or_create_today_offstream,
-            STREAMER_NAME,
-            CHANNEL_ID
-        )
-
-        today_label = datetime.now().strftime("%Y-%m-%d")
-        return {
-            "stream_id": offstream_id,
-            "stream_label_date": today_label,
-            "session_type": "offstream",
-        }
-
-    async def _attach_session_to_entry(self, entry):
-        session_info = await self._resolve_session_for_entry()
-        entry["stream_id"] = session_info["stream_id"]
-        entry["stream_label_date"] = session_info["stream_label_date"]
-        entry["session_type"] = session_info["session_type"]
-
-        if entry["session_type"] == "offstream":
-            self.stats["offstream_events"] += 1
-        else:
-            self.stats["stream_events"] += 1
-
-        await self.queue.put(entry)
+                print(f'[STREAM MONITOR] {e}')
+            try:
+                await asyncio.wait_for(self.stop_event.wait(), timeout=15)
+            except asyncio.TimeoutError:
+                pass
 
     async def socket_listener(self):
+        if not CHANNEL_SLUG:
+            raise RuntimeError('KICK_CHANNEL_SLUG .env içinde ayarlanmalı.')
         while self.running:
             try:
-                print(f"[KICK] Bağlanılıyor... chatroom_id={CHATROOM_ID}")
-
-                async with websockets.connect(
-                    KICK_WS_URL,
-                    ping_interval=30,
-                    ping_timeout=30,
-                    close_timeout=10,
-                    max_size=None
-                ) as ws:
-                    set_socket_connected(True)
-
-                    subscribe_msg = {
-                        "event": "pusher:subscribe",
-                        "data": {
-                            "auth": "",
-                            "channel": f"chatrooms.{CHATROOM_ID}.v2"
-                        }
-                    }
-
-                    await ws.send(json.dumps(subscribe_msg))
-                    print(f"[+] {STREAMER_NAME} kanalına bağlantı başarılı. İzleniyor...\n" + "-" * 60)
-
+                meta = await asyncio.to_thread(get_channel_meta)
+                chatroom_id = (meta or {}).get('chatroom_id') or await asyncio.to_thread(get_chatroom_id)
+                if not chatroom_id:
+                    print('[KICK] Chatroom ID bulunamadı. 10 sn sonra tekrar deniyorum.')
+                    await asyncio.sleep(10); continue
+                print(f'[KICK] Pusher bağlanıyor: {CHANNEL_SLUG} chatroom={chatroom_id}')
+                async with websockets.connect(PUSHER_WS_URL, ping_interval=25, ping_timeout=25, close_timeout=10, max_size=4 * 1024 * 1024) as ws:
+                    await ws.send(json.dumps({'event':'pusher:subscribe','data':{'auth':'','channel':f'chatrooms.{chatroom_id}.v2'}}))
+                    print('[KICK] Chat subscription gönderildi.')
                     async for message in ws:
-                        if not self.running:
-                            break
-
-                        update_socket_message_time()
-
-                        try:
-                            raw_data = json.loads(message)
-                        except json.JSONDecodeError:
+                        if not self.running: break
+                        self.stats['received'] += 1
+                        try: raw = json.loads(message)
+                        except Exception: continue
+                        event = raw.get('event','')
+                        if event == 'pusher:ping':
+                            await ws.send(json.dumps({'event':'pusher:pong','data':{}})); continue
+                        if event in {'pusher:pong','pusher:connection_established','pusher_internal:subscription_succeeded','pusher:subscription_succeeded'}:
                             continue
-
-                        event_type = raw_data.get("event")
-
-                        if event_type == "pusher:ping":
-                            await ws.send(json.dumps({"event": "pusher:pong", "data": {}}))
-                            continue
-
-                        if event_type in [
-                            "pusher:pong",
-                            "pusher:connection_established",
-                            "pusher_internal:subscription_succeeded",
-                            "pusher:subscription_succeeded"
-                        ]:
-                            continue
-
-                        data = None
-                        if "data" in raw_data:
-                            if isinstance(raw_data["data"], str):
-                                try:
-                                    data = json.loads(raw_data["data"])
-                                except json.JSONDecodeError:
-                                    continue
-                            elif isinstance(raw_data["data"], dict):
-                                data = raw_data["data"]
-
-                        if data is None:
-                            continue
-
-                        update_last_event()
-
-                        event_name = self.extract_event_name(event_type)
-
-                        log_entry = {
-                            "t": datetime.now().isoformat(),
-                            "e": event_name,
-                            "type": "other"
-                        }
-
-                        if event_name == "ChatMessageEvent":
-                            self.stats["chat_messages"] += 1
-
-                            user_name = self.safe_get_first(
-                                data,
-                                ("sender", "username"),
-                                ("user", "username"),
-                                default="Unknown"
-                            )
-
-                            message_text = self.safe_get_first(
-                                data,
-                                ("content",),
-                                ("message", "content"),
-                                default=""
-                            )
-
-                            log_entry.update({
-                                "user": user_name,
-                                "msg": str(message_text),
-                                "type": "chat",
-                                "raw": data
-                            })
-
-                            print(f"[CHAT] {user_name}: {message_text}")
-
-                        elif event_name == "MessageDeletedEvent":
-                            self.stats["deleted_messages"] += 1
-
-                            msg_id = self.safe_get_first(
-                                data,
-                                ("message", "id"),
-                                ("message_id",),
-                                ("id",),
-                                default=None
-                            )
-
-                            target_user = self.safe_get_first(
-                                data,
-                                ("message", "sender", "username"),
-                                ("user", "username"),
-                                ("target_user", "username"),
-                                default=None
-                            )
-
-                            deleted_msg = self.safe_get_first(
-                                data,
-                                ("message", "content"),
-                                ("message", "body"),
-                                ("content",),
-                                default=None
-                            )
-
-                            mod_name = self.safe_get_first(
-                                data,
-                                ("moderator", "username"),
-                                ("mod_user", "username"),
-                                ("deleted_by", "username"),
-                                ("actor", "username"),
-                                default="Unknown Mod"
-                            )
-
-                            log_entry.update({
-                                "mod": mod_name,
-                                "target_user": target_user,
-                                "msg_id": msg_id,
-                                "msg": deleted_msg,
-                                "type": "deleted",
-                                "raw": data
-                            })
-
-                            print(f"[SİLİNDİ] Mesaj ID: {msg_id} | Mod: {mod_name}")
-
-                        elif event_name == "UserBannedEvent":
-                            user_name = self.safe_get_first(
-                                data,
-                                ("user", "username"),
-                                ("banned_user", "username"),
-                                ("target_user", "username"),
-                                default="Unknown"
-                            )
-
-                            mod_name = self.safe_get_first(
-                                data,
-                                ("banned_by", "username"),
-                                ("mod_user", "username"),
-                                ("moderator", "username"),
-                                ("actor", "username"),
-                                default="Unknown Mod"
-                            )
-
-                            reason = self.safe_get_first(
-                                data,
-                                ("reason",),
-                                ("ban_reason",),
-                                default=None
-                            )
-
-                            duration = self.safe_get_first(
-                                data,
-                                ("duration",),
-                                ("ban_duration",),
-                                default=None
-                            )
-
-                            try:
-                                duration_int = int(duration) if duration not in (None, "", "null") else None
-                            except (TypeError, ValueError):
-                                duration_int = None
-
-                            permanent = 1 if duration_int in (None, 0) else 0
-
-                            if permanent:
-                                self.stats["bans"] += 1
-                                action_type = "ban"
-                            else:
-                                self.stats["timeouts"] += 1
-                                action_type = "timeout"
-
-                            log_entry.update({
-                                "user": user_name,
-                                "target_user": user_name,
-                                "mod": mod_name,
-                                "reason": reason,
-                                "duration": duration_int,
-                                "permanent": permanent,
-                                "type": action_type,
-                                "raw": data
-                            })
-
-                            print(f"[BAN/TIMEOUT] Kullanıcı: {user_name} | Mod: {mod_name} | Süre: {duration_int}")
-
-                        elif event_name == "UserUnbannedEvent":
-                            self.stats["unbans"] += 1
-
-                            user_name = self.safe_get_first(
-                                data,
-                                ("user", "username"),
-                                ("unbanned_user", "username"),
-                                ("target_user", "username"),
-                                default="Unknown"
-                            )
-
-                            mod_name = self.safe_get_first(
-                                data,
-                                ("unbanned_by", "username"),
-                                ("mod_user", "username"),
-                                ("moderator", "username"),
-                                ("actor", "username"),
-                                default="Unknown Mod"
-                            )
-
-                            reason = self.safe_get_first(
-                                data,
-                                ("reason",),
-                                default=None
-                            )
-
-                            log_entry.update({
-                                "user": user_name,
-                                "target_user": user_name,
-                                "mod": mod_name,
-                                "reason": reason,
-                                "type": "unban",
-                                "raw": data
-                            })
-
-                            print(f"[UNBAN] Kullanıcı: {user_name} | Mod: {mod_name}")
-
-                        elif event_name == "SubscriptionEvent":
-                            self.stats["subscriptions"] += 1
-
-                            user_name = self.safe_get_first(
-                                data,
-                                ("user", "username"),
-                                ("subscriber", "username"),
-                                ("sender", "username"),
-                                default="Unknown"
-                            )
-
-                            log_entry.update({
-                                "user": user_name,
-                                "type": "subscription",
-                                "raw": data
-                            })
-
-                            print(f"[SUB] Kullanıcı: {user_name}")
-
-                        elif event_name == "GiftedSubscriptionsEvent":
-                            self.stats["gift_subscriptions"] += 1
-
-                            user_name = self.safe_get_first(
-                                data,
-                                ("gifter", "username"),
-                                ("user", "username"),
-                                ("sender", "username"),
-                                default="Unknown"
-                            )
-
-                            log_entry.update({
-                                "user": user_name,
-                                "type": "gift_sub",
-                                "raw": data
-                            })
-
-                            print(f"[GIFT SUB] Gönderen: {user_name}")
-
-                        else:
-                            self.stats["other_events"] += 1
-                            log_entry["raw"] = data
-
-                        await self._attach_session_to_entry(log_entry)
-
-            except websockets.exceptions.ConnectionClosed as e:
-                set_socket_connected(False)
-                print(f"[!] Bağlantı koptu ({repr(e)}). {RECONNECT_DELAY} sn içinde tekrar denenecek...")
-                await asyncio.sleep(RECONNECT_DELAY)
-
+                        data = self.parse_data(raw)
+                        if data is None: continue
+                        name = self.event_name(event)
+                        entry = self.normalize_event(data, name)
+                        if entry.get('type') == 'chat':
+                            self.stats['chat'] += 1
+                            if PRINT_CHAT: print(f"[CHAT] {entry.get('user')}: {entry.get('msg')}")
+                        await self.enqueue(entry)
+            except asyncio.CancelledError:
+                raise
             except Exception as e:
-                set_socket_connected(False)
-                print(f"[!] Hata oluştu ({repr(e)}). {RECONNECT_DELAY} sn içinde tekrar denenecek...")
-                await asyncio.sleep(RECONNECT_DELAY)
+                print(f'[KICK] bağlantı hatası: {e}')
+                await asyncio.sleep(RECONNECT_DELAY_SECONDS)
 
-        print("[*] Socket listener kapandı.")
-
-    def print_summary(self):
-        print("\n" + "=" * 40)
-        print("OTURUM ÖZETİ")
-        print(f"Toplam Mesaj      : {self.stats['chat_messages']}")
-        print(f"Silinen Mesaj     : {self.stats['deleted_messages']}")
-        print(f"Timeout           : {self.stats['timeouts']}")
-        print(f"Kalıcı Ban        : {self.stats['bans']}")
-        print(f"Unban             : {self.stats['unbans']}")
-        print(f"Subscription      : {self.stats['subscriptions']}")
-        print(f"Gift Sub          : {self.stats['gift_subscriptions']}")
-        print(f"Diğer Eventler    : {self.stats['other_events']}")
-        print(f"Stream Event      : {self.stats['stream_events']}")
-        print(f"Offstream Event   : {self.stats['offstream_events']}")
-        print("=" * 40)
+    async def run(self):
+        init_db()
+        tasks = [
+            asyncio.create_task(self.writer_worker()),
+            asyncio.create_task(self.socket_listener()),
+            asyncio.create_task(monitor_loop(self.stop_event)),
+        ]
+        try:
+            await asyncio.gather(*tasks)
+        except (KeyboardInterrupt, asyncio.CancelledError):
+            pass
+        finally:
+            self.running = False
+            self.stop_event.set()
+            await self.queue.join()
+            for t in tasks:
+                if not t.done(): t.cancel()
 
 
 async def main():
     recorder = KickRecorder()
-    writer_task = asyncio.create_task(recorder.file_writer_worker())
-    socket_task = asyncio.create_task(recorder.socket_listener())
-    watchdog_task = asyncio.create_task(recorder.stream_watchdog())
-
-    try:
-        await asyncio.gather(writer_task, socket_task, watchdog_task)
-    finally:
-        recorder.running = False
-
-        try:
-            await asyncio.wait_for(recorder.queue.join(), timeout=5)
-        except asyncio.TimeoutError:
-            pass
-
-        for task in (writer_task, socket_task, watchdog_task):
-            task.cancel()
-
-        recorder.print_summary()
+    await recorder.run()
 
 
-if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        print("\n[!] Program kullanıcı tarafından durduruldu.")
+if __name__ == '__main__':
+    asyncio.run(main())
